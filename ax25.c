@@ -171,6 +171,12 @@ static int ax25_decode_addr(const uint8_t *data, ax25_addr_t *addr)
 
     for (i = 0; i < 6; i++) {
         c = (char)((data[i] >> 1) & 0x7f);
+        /* Callsign characters are alphanumeric; space is trailing padding.
+         * Reject anything else so a crafted AX.25 header cannot inject TNC2
+         * delimiters ('>', ':', ',') into the formatted line. */
+        if (c != ' ' && !isalnum((unsigned char)c)) {
+            return LHKT_ERR_FORMAT;
+        }
         addr->call[i] = c;
     }
 

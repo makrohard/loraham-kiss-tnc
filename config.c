@@ -224,6 +224,10 @@ int lhkt_config_parse_line(lhkt_config_t *cfg, char *line, unsigned int line_no)
         return copy_string(cfg->kiss_host, sizeof(cfg->kiss_host), value);
     }
 
+    if (strcmp(key, "bind") == 0) {
+        return lhkt_bind_apply(cfg, value);
+    }
+
     if (strcmp(key, "data_socket") == 0) {
         return copy_string(cfg->data_socket, sizeof(cfg->data_socket), value);
     }

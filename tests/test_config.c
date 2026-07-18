@@ -13,6 +13,8 @@ static void test_defaults(void)
 
     assert(strcmp(cfg.kiss_host, "127.0.0.1") == 0);
     assert(cfg.kiss_port == 8001);
+    assert(cfg.bind_net == 0x7F000001u);
+    assert(cfg.bind_prefix == 32);
     assert(strcmp(cfg.data_socket, "/tmp/lora433f.sock") == 0);
     assert(strcmp(cfg.conf_socket, "/tmp/loraconf433.sock") == 0);
     assert(cfg.rx_only == 0);
@@ -223,9 +225,31 @@ static void test_reject_invalid(void)
     assert(lhkt_config_parse_line(&cfg, bad17, 17) == LHKT_ERR_FORMAT);
 }
 
+static void test_bind_config_key(void)
+{
+    lhkt_config_t cfg;
+    char l_cidr[] = "bind = 192.168.178.0/24";
+    char l_any[]  = "bind = 0.0.0.0/0";
+    char l_bad[]  = "bind = nope";
+
+    lhkt_config_defaults(&cfg);
+    assert(lhkt_config_parse_line(&cfg, l_cidr, 1) == LHKT_OK);
+    assert(cfg.bind_net == 0xC0A8B200u);
+    assert(cfg.bind_prefix == 24);
+    assert(strcmp(cfg.kiss_host, "0.0.0.0") == 0);
+
+    lhkt_config_defaults(&cfg);
+    assert(lhkt_config_parse_line(&cfg, l_any, 1) == LHKT_OK);
+    assert(cfg.bind_prefix == 0);
+
+    lhkt_config_defaults(&cfg);
+    assert(lhkt_config_parse_line(&cfg, l_bad, 1) != LHKT_OK);
+}
+
 int main(void)
 {
     test_defaults();
+    test_bind_config_key();
     test_parse_line();
     test_hash_only_comments();
     test_load_file();

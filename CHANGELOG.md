@@ -1,6 +1,17 @@
+# Unreleased
+- Add `--bind` source-IP allow-list (IPv4/CIDR, default 127.0.0.1). Only matching
+  peers may connect; the listen address is derived from it; rejected peers are
+  logged. Config key `bind`.
+- Hardening: reject an empty CIDR prefix (`--bind x/` no longer means allow-all);
+  validate AX.25 callsign charset on decode (no TNC2 delimiter injection);
+  accept() backs off on fd exhaustion; LoRaHAM data socket set non-blocking;
+  64-bit millisecond timestamps (no 32-bit wrap); SIGINT/SIGTERM via sigaction;
+  bounded main-loop select timeout; production build flags (-O2, _FORTIFY_SOURCE,
+  stack protector, PIE/RELRO/BIND_NOW).
+
 # 0.4.0
 - Add v111 TX_RESULT lifecycle with KISS client recovery.
-- Rely on loraham_daemon version >= 111
+- Rely on loraham_daemon 110+ (managed TX_RESULT confirmation needs 111+; 110 uses CONF fallback)
 
 # 0.3.0
 - Add CAD status counters to stats output and set default stats interval to 900s

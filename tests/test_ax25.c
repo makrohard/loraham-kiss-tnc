@@ -188,6 +188,32 @@ static void test_reject_non_ui(void)
     assert(ax25_decode_ui(raw, raw_len, &out) == LHKT_ERR_UNSUPPORTED);
 }
 
+static void test_decode_reject_bad_callsign_char(void)
+{
+    ax25_frame_t in;
+    ax25_frame_t out;
+    uint8_t raw[LHKT_AX25_MAX_FRAME];
+    size_t raw_len = 0;
+
+    ax25_frame_init(&in);
+    assert(ax25_addr_parse("APRS", &in.dst) == LHKT_OK);
+    assert(ax25_addr_parse("DJ0CHE-10", &in.src) == LHKT_OK);
+    in.payload[0] = 'x';
+    in.payload_len = 1;
+    assert(ax25_encode_ui(&in, raw, sizeof(raw), &raw_len) == LHKT_OK);
+
+    /* Inject a TNC2 delimiter (':' = 0x3A) as the first destination-callsign
+     * character (AX.25 stores char << 1). Must be rejected, not passed through
+     * into the formatted line. */
+    raw[0] = (uint8_t)(':' << 1);
+    assert(ax25_decode_ui(raw, raw_len, &out) == LHKT_ERR_FORMAT);
+
+    /* '>' in the source callsign is likewise rejected. */
+    assert(ax25_encode_ui(&in, raw, sizeof(raw), &raw_len) == LHKT_OK);
+    raw[7] = (uint8_t)('>' << 1);
+    assert(ax25_decode_ui(raw, raw_len, &out) == LHKT_ERR_FORMAT);
+}
+
 int main(void)
 {
     test_addr_parse_format();
@@ -198,6 +224,7 @@ int main(void)
     test_decode_reject_missing_final_address_bit();
     test_decode_reject_wrong_pid();
     test_reject_non_ui();
+    test_decode_reject_bad_callsign_char();
 
     puts("test_ax25: OK");
     return 0;

@@ -40,11 +40,20 @@ int bridge_runtime_should_stop(void)
 
 void bridge_runtime_install_signal_handlers(void)
 {
-    if (signal(SIGINT, bridge_runtime_signal_handler) == SIG_ERR) {
+    struct sigaction sa;
+
+    /* sa_flags = 0 (no SA_RESTART): interrupted slow syscalls return EINTR so
+     * the main loop can observe the stop flag promptly and shut down. */
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = bridge_runtime_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    if (sigaction(SIGINT, &sa, NULL) != 0) {
         fprintf(stderr, "[WARN] Could not install SIGINT handler\n");
     }
 
-    if (signal(SIGTERM, bridge_runtime_signal_handler) == SIG_ERR) {
+    if (sigaction(SIGTERM, &sa, NULL) != 0) {
         fprintf(stderr, "[WARN] Could not install SIGTERM handler\n");
     }
 }
@@ -191,7 +200,7 @@ size_t lhkt_test_bridge_sleep_call_count(void)
 }
 #endif
 
-long bridge_runtime_now_ms(void)
+int64_t bridge_runtime_now_ms(void)
 {
     struct timespec ts;
 
@@ -199,5 +208,5 @@ long bridge_runtime_now_ms(void)
         return 0;
     }
 
-    return (long)ts.tv_sec * 1000L + (long)(ts.tv_nsec / 1000000L);
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
 }

@@ -37,6 +37,7 @@
 #define LHKT_TX_RESTORE_RETRY_DELAY_MS 100
 #define LHKT_TX_START_WAIT_MS 500
 #define LHKT_QUEUE_POLL_USEC 100000
+#define LHKT_IDLE_POLL_SEC 5
 #define LHKT_TEST_HOOK_MAX_CALLS 16
 
 /* ---- Disconnect policy ---- */
@@ -180,7 +181,8 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
         return 1;
     }
 
-    printf("[KISS] Listening on %s:%d\n", cfg->kiss_host, cfg->kiss_port);
+    printf("[KISS] Listening on %s:%d (allow %s)\n",
+           cfg->kiss_host, cfg->kiss_port, cfg->bind_spec);
     printf("[KISS] Waiting for client...\n");
 
     while (!bridge_runtime_should_stop()) {
@@ -294,6 +296,15 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
             }
         }
 
+        /* Bounded fallback: when otherwise idle (daemon up, queue empty,
+         * stats disabled) never block forever, so the loop keeps polling the
+         * stop flag and daemon-socket liveness periodically. */
+        if (timeout == NULL) {
+            tv.tv_sec = LHKT_IDLE_POLL_SEC;
+            tv.tv_usec = 0;
+            timeout = &tv;
+        }
+
         ret = select(max_fd + 1, &rfds, NULL, NULL, timeout);
         if (ret < 0) {
             if (errno == EINTR) {
@@ -352,13 +363,20 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
         }
 
         if (client_fd < 0 && FD_ISSET(listen_fd, &rfds)) {
-            client_fd = lhkt_tcp_server_accept(listen_fd, peer, sizeof(peer));
+            client_fd = lhkt_tcp_server_accept(listen_fd,
+                                               cfg->bind_net, cfg->bind_prefix,
+                                               peer, sizeof(peer));
             if (client_fd < 0) {
                 if (errno == EINTR) {
                     continue;
                 }
 
+                /* On fd exhaustion (EMFILE/ENFILE/ENOBUFS/ENOMEM) the pending
+                 * connection stays in the backlog and select() would report
+                 * the listen fd readable again immediately — back off briefly
+                 * to avoid a 100% CPU spin until an fd frees up. */
                 fprintf(stderr, "[ERR] KISS/TCP accept failed\n");
+                bridge_runtime_sleep_ms(100);
                 continue;
             }
 

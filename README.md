@@ -2,10 +2,10 @@
 
 KISS/TCP TNC bridge for `LoRaHAM_Daemon`.
 
-It exposes a KISS/TCP port for APRS clients and talks to the LoRaHAM daemon through its framed DATA Unix socket.
+It exposes a KISS/TCP port for APRS clients and talks to the LoRaHAM daemon through its framed DATA Unix socket. The daemon socket defaults to `/run/loraham/lora433f.sock` when that socket exists (systemd deployment) and falls back to `/tmp/lora433f.sock` otherwise; override with `--data-socket`/`--conf-socket` or the config file.
 
 ```text
-APRS client <-> KISS/TCP <-> loraham_kiss_tnc <-> /tmp/lora433f.sock <-> loraham_daemon
+APRS client <-> KISS/TCP <-> loraham_kiss_tnc <-> framed DATA socket <-> loraham_daemon
 ```
 
 ## Compatibility
@@ -56,22 +56,27 @@ The bridge intentionally does not requeue daemon `CAD_TIMEOUT` framed errors. Th
 
 ## Usage
 
-```bash
-Usage: ./loraham_kiss_tnc/loraham_kiss_tnc [OPTIONS]
+```text
+Usage: ./loraham-kiss-tnc [OPTIONS]
 
 LoRaHAM KISS/TCP TNC bridge
 
 Options:
   -c, --config FILE        Load config file
-      --kiss-host HOST     KISS/TCP bind host
-      --kiss-port PORT     KISS/TCP bind port
+      --bind CIDR          Source allow-list: IPv4 or CIDR that may
+                           connect. 127.0.0.1 (default, loopback),
+                           192.168.0.0/24 (a LAN), 0.0.0.0/0 (any).
+                           KISS has no auth. Derives the listen address.
+      --kiss-host HOST     Explicit listen address (advanced; overrides
+                           the address derived from --bind)
+      --kiss-port PORT     KISS/TCP listen port
       --data-socket PATH   LoRaHAM framed data socket
       --conf-socket PATH   LoRaHAM config socket
-      --rx-freq MHz        RX/config frequency
-      --tx-freq MHz        TX/config frequency
+      --rx-freq MHz        RX frequency
+      --tx-freq MHz        TX frequency
       --rx-only            Disable TX
       --tx-settle-ms MS    Wait after TX freq switch
-      --tx-return-ms MS    Fallback wait after TX before RX restore
+      --tx-return-ms MS    Fallback wait after TX
       --tx-busy-timeout-ms MS
                             Max wait for local TX busy
       --tx-queue-len N     Queued TX packet limit
@@ -80,8 +85,32 @@ Options:
   -v, --verbose            Verbose output
       --version            Print version and exit
   -h, --help               Show help
-
 ```
+
+## Network exposure (`--bind`)
+
+`--bind` is a source-IP allow-list: only peers whose address falls inside the
+given IPv4/CIDR may connect. It also derives the listen address — loopback when
+the allowed network is within `127.0.0.0/8` (so the port stays unexposed),
+otherwise all interfaces (`0.0.0.0`) with the source filter applied on
+`accept()`.
+
+| `--bind` | Who may connect | Listens on |
+|----------|-----------------|-----------|
+| `127.0.0.1` (default) | this host only | `127.0.0.1` |
+| `192.168.178.0/24`    | that LAN subnet | `0.0.0.0` |
+| `10.0.0.5`            | one host (/32)  | `0.0.0.0` |
+| `0.0.0.0/0`           | anyone          | `0.0.0.0` |
+
+A plain address is treated as `/32`. Config-file key: `bind = <ipv4|cidr>`.
+`--kiss-host` sets the listen address explicitly (advanced) while the allow-list
+still comes from `--bind`.
+
+**The KISS protocol has no authentication and this bridge adds none.** Anyone
+allowed to connect can transmit on your station and read received traffic.
+Keep the allow-list as narrow as possible; for access beyond a trusted LAN,
+prefer a VPN/SSH tunnel and leave `--bind 127.0.0.1`. Rejected peers are logged
+(`[KISS] rejected connection from <ip> (not in allow-list)`).
 
 ## Serial KISS
 
@@ -97,10 +126,12 @@ socat -d -d \
 ```
 
 
-Make sure that the TNC listens on the network. For testing, you may use 0.0.0.0.
+To reach the TNC from another machine, widen the allow-list with `--bind`
+(e.g. `--bind 192.168.0.0/24` for a LAN); the default `--bind 127.0.0.1`
+listens on loopback only. See "Network exposure" above.
 ```bash
 ./loraham_kiss_tnc/loraham_kiss_tnc \
-  --kiss-host 127.0.0.1 \
+  --bind 192.168.0.0/24 \
   --kiss-port 8001
 ```
 The included shell script ```start-serial-kiss.sh``` starts socat configured for local use.

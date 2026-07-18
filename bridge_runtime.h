@@ -13,7 +13,7 @@ int bridge_runtime_add_fd_to_set(int fd, fd_set *set, int *max_fd);
 int bridge_runtime_set_fd_nonblocking(int fd);
 
 int bridge_runtime_sleep_ms(int ms);
-long bridge_runtime_now_ms(void);
+int64_t bridge_runtime_now_ms(void);
 
 #ifdef LHKT_TEST
 void bridge_runtime_test_reset_hooks(void);

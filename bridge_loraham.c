@@ -253,6 +253,13 @@ int bridge_loraham_connect_data_socket(const lhkt_config_t *cfg)
         return LHKT_ERR;
     }
 
+    /* Non-blocking like the CONF socket: a read must never block the
+     * single-threaded bridge even if a future path reads without select(). */
+    if (bridge_runtime_set_fd_nonblocking(fd) != LHKT_OK) {
+        lhkt_tcp_server_close(fd);
+        return LHKT_ERR;
+    }
+
     printf("[LoRaHAM] Framed data socket connected: %s\n", cfg->data_socket);
     return fd;
 }
@@ -397,8 +404,8 @@ static int bridge_loraham_wait_tx_complete(int conf_fd,
                                            bridge_conf_state_t *conf_state,
                                            const lhkt_config_t *cfg)
 {
-    long deadline;
-    long now;
+    int64_t deadline;
+    int64_t now;
     int saw_tx;
     int ret;
     unsigned long start_busy_seq;
@@ -516,8 +523,8 @@ static int bridge_loraham_wait_tx_result(
 {
     uint8_t buf[512];
     loraham_frame_t frame;
-    long deadline;
-    long now;
+    int64_t deadline;
+    int64_t now;
     ssize_t n;
     size_t i;
     int ret;
@@ -847,7 +854,7 @@ int bridge_loraham_tx_queue_drain_with_client(
     loraham_framed_rx_state_t *frame_state)
 {
     bridge_tx_item_t *item;
-    long now;
+    int64_t now;
     int decision;
     int ret;
     int packet_written;

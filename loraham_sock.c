@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include "loraham_sock.h"
 
 #include <errno.h>
@@ -7,6 +8,8 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 
 /*
@@ -69,22 +72,46 @@ ssize_t loraham_sock_read(int fd,
     return read(fd, buf, buf_size);
 }
 
+static int64_t loraham_sock_now_ms(void)
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+}
+
 static int loraham_wait_writable(int fd)
 {
     fd_set wfds;
     struct timeval tv;
     int ret;
+    int64_t deadline;
+    int64_t now;
 
     if (fd < 0 || fd >= FD_SETSIZE) {
         return -1;
     }
 
+    /* Fixed total deadline: an EINTR retry must not refresh the full timeout
+     * (which could stall a shutdown by repeatedly restarting the wait). */
+    deadline = loraham_sock_now_ms() +
+               (int64_t)LHKT_LORAHAM_WRITE_TIMEOUT_SEC * 1000;
+
     for (;;) {
+        now = loraham_sock_now_ms();
+        if (now >= deadline) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+
         FD_ZERO(&wfds);
         FD_SET(fd, &wfds);
 
-        tv.tv_sec = LHKT_LORAHAM_WRITE_TIMEOUT_SEC;
-        tv.tv_usec = 0;
+        tv.tv_sec = (time_t)((deadline - now) / 1000);
+        tv.tv_usec = (suseconds_t)(((deadline - now) % 1000) * 1000);
 
         ret = select(fd + 1, NULL, &wfds, NULL, &tv);
         if (ret < 0) {

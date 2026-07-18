@@ -1,11 +1,19 @@
 # LoRaHAM KISS TNC sample config
 # CLI options override this file.
 
-kiss_host=127.0.0.1
+# Source allow-list: which IPv4/CIDR may connect. KISS has no authentication,
+# so keep this as narrow as possible. Examples:
+#   127.0.0.1          this host only (default, loopback)
+#   192.168.178.0/24   a LAN subnet
+#   0.0.0.0/0          anyone (public)
+# The listen address is derived from this (loopback stays loopback).
+bind=127.0.0.1
+# kiss_host=0.0.0.0    # advanced: explicit listen address override
 kiss_port=8001
 
 
-# Expected socket from running LoRaHAM Daemon
+# Daemon sockets. Default resolves /run/loraham/* (systemd) first, /tmp/*
+# fallback; the values below are the explicit /tmp form.
 data_socket=/tmp/lora433f.sock
 conf_socket=/tmp/loraconf433.sock
 
@@ -50,7 +58,7 @@ sf=12               # spreading factor; valid: 7..12
 bw=125.0            # bandwidth in kHz; valid list above kHz: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125.0, 250.0, 500.0
 cr=5                # coding rate; valid: 5..8
 crc=1               # CRC; valid: 0/1
-preamble=8          # preamble length; valid: 6..65535
+preamble=8          # preamble length; valid: 1..65535
 syncword=0x12       # sync word; 0x12 private/LoRa-APRS-style, 0x34 LoRaWAN public, 0x2B mesh-style
 ldro=1              # low data rate optimization; use 1 for SF12/BW125, AUTO otherwise
 power=17            # TX power in dBm; valid: 0..20

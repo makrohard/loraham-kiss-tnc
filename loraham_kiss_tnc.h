@@ -18,6 +18,9 @@
 
 /* Defaults */
 #define LHKT_DEFAULT_KISS_HOST   "127.0.0.1"
+
+/* Default source allow-list: loopback only (127.0.0.1/32). */
+#define LHKT_DEFAULT_BIND        "127.0.0.1"
 #define LHKT_DEFAULT_KISS_PORT   8001
 #define LHKT_DEFAULT_DATA_SOCKET "/tmp/lora433f.sock"
 #define LHKT_DEFAULT_CONF_SOCKET "/tmp/loraconf433.sock"
@@ -35,8 +38,15 @@
 #define LHKT_ERR_TX_RESULT    -10
 
 typedef struct {
-    char kiss_host[LHKT_HOST_MAX];
+    char kiss_host[LHKT_HOST_MAX];   /* listen bind address (derived from bind,
+                                      * or an explicit --kiss-host override) */
     int  kiss_port;
+
+    /* Source-IP allow-list (--bind CIDR). A peer may connect only if its
+     * address is inside this network. */
+    char     bind_spec[LHKT_HOST_MAX];  /* CIDR text for display, e.g. 10.0.0.0/24 */
+    uint32_t bind_net;                  /* network address, host byte order, masked */
+    int      bind_prefix;               /* 0..32 */
 
     char data_socket[LHKT_PATH_MAX];
     char conf_socket[LHKT_PATH_MAX];
@@ -97,6 +107,17 @@ typedef struct {
 } lhkt_stats_t;
 
 void lhkt_config_defaults(lhkt_config_t *cfg);
+
+/* Parse a --bind / config `bind` argument: an IPv4 address ("A.B.C.D",
+ * implicit /32) or CIDR ("A.B.C.D/N", N=0..32). Sets cfg->bind_net/prefix/spec
+ * (the source allow-list) and derives cfg->kiss_host (the listen address:
+ * loopback when the network is within 127.0.0.0/8, else 0.0.0.0). Returns
+ * LHKT_OK or LHKT_ERR_FORMAT. */
+int  lhkt_bind_apply(lhkt_config_t *cfg, const char *arg);
+
+/* True if the host-order IPv4 address is inside net_host/prefix. */
+int  lhkt_ipv4_in_cidr(uint32_t addr_host, uint32_t net_host, int prefix);
+
 void lhkt_stats_init(lhkt_stats_t *stats);
 void lhkt_stats_print(const lhkt_stats_t *stats);
 

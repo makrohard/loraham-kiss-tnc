@@ -22,8 +22,13 @@ void lhkt_cli_print_usage(const char *prog)
     printf("\n");
     printf("Options:\n");
     printf("  -c, --config FILE        Load config file\n");
-    printf("      --kiss-host HOST     KISS/TCP bind host\n");
-    printf("      --kiss-port PORT     KISS/TCP bind port\n");
+    printf("      --bind CIDR          Source allow-list: IPv4 or CIDR that may\n");
+    printf("                           connect. 127.0.0.1 (default, loopback),\n");
+    printf("                           192.168.0.0/24 (a LAN), 0.0.0.0/0 (any).\n");
+    printf("                           KISS has no auth. Derives the listen address.\n");
+    printf("      --kiss-host HOST     Explicit listen address (advanced; overrides\n");
+    printf("                           the address derived from --bind)\n");
+    printf("      --kiss-port PORT     KISS/TCP listen port\n");
     printf("      --data-socket PATH   LoRaHAM framed data socket\n");
     printf("      --conf-socket PATH   LoRaHAM config socket\n");
     printf("      --rx-freq MHz        RX frequency\n");
@@ -141,6 +146,7 @@ static int parse_cli_args(int argc, char **argv, lhkt_config_t *cfg)
     enum {
         OPT_KISS_HOST = 1000,
         OPT_KISS_PORT,
+        OPT_BIND,
         OPT_DATA_SOCKET,
         OPT_CONF_SOCKET,
         OPT_RX_FREQ,
@@ -158,6 +164,7 @@ static int parse_cli_args(int argc, char **argv, lhkt_config_t *cfg)
         { "config",      required_argument, 0, 'c' },
         { "kiss-host",   required_argument, 0, OPT_KISS_HOST },
         { "kiss-port",   required_argument, 0, OPT_KISS_PORT },
+        { "bind",        required_argument, 0, OPT_BIND },
         { "data-socket", required_argument, 0, OPT_DATA_SOCKET },
         { "conf-socket", required_argument, 0, OPT_CONF_SOCKET },
         { "rx-freq",     required_argument, 0, OPT_RX_FREQ },
@@ -204,6 +211,17 @@ static int parse_cli_args(int argc, char **argv, lhkt_config_t *cfg)
         case OPT_KISS_HOST:
             ret = copy_arg(cfg->kiss_host, sizeof(cfg->kiss_host), optarg);
             if (ret != LHKT_OK) {
+                return ret;
+            }
+            break;
+
+        case OPT_BIND:
+            ret = lhkt_bind_apply(cfg, optarg);
+            if (ret != LHKT_OK) {
+                fprintf(stderr,
+                        "[CFG] invalid --bind '%s' "
+                        "(use an IPv4 address or CIDR, e.g. 192.168.0.0/24)\n",
+                        optarg ? optarg : "");
                 return ret;
             }
             break;
@@ -332,8 +350,8 @@ void lhkt_cli_print_config(const lhkt_config_t *cfg)
         return;
     }
 
-    printf("[CFG] kiss_host=%s\n", cfg->kiss_host);
-    printf("[CFG] kiss_port=%d\n", cfg->kiss_port);
+    printf("[CFG] listen=%s:%d  allow=%s\n",
+           cfg->kiss_host, cfg->kiss_port, cfg->bind_spec);
     printf("[CFG] data_socket=%s\n", cfg->data_socket);
     printf("[CFG] conf_socket=%s\n", cfg->conf_socket);
     printf("[CFG] rx_only=%d\n", cfg->rx_only);

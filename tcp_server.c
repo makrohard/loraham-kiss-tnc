@@ -2,6 +2,8 @@
 #include "loraham_kiss_tnc.h"
 
 #include <arpa/inet.h>
+
+#include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -57,7 +59,8 @@ int lhkt_tcp_server_listen(const char *host, int port)
     return fd;
 }
 
-int lhkt_tcp_server_accept(int listen_fd, char *peer, size_t peer_size)
+int lhkt_tcp_server_accept(int listen_fd, uint32_t allow_net, int allow_prefix,
+                           char *peer, size_t peer_size)
 {
     int fd;
     struct sockaddr_in addr;
@@ -68,24 +71,35 @@ int lhkt_tcp_server_accept(int listen_fd, char *peer, size_t peer_size)
         return LHKT_ERR;
     }
 
-    addr_len = sizeof(addr);
-
     for (;;) {
+        addr_len = sizeof(addr);
         fd = accept(listen_fd, (struct sockaddr *)&addr, &addr_len);
-        if (fd >= 0) {
-            break;
+        if (fd < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return LHKT_ERR;
         }
 
-        if (errno == EINTR) {
+        /* Source allow-list: reject and keep waiting for an allowed peer. */
+        if (!lhkt_ipv4_in_cidr(ntohl(addr.sin_addr.s_addr),
+                               allow_net, allow_prefix)) {
+            if (inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip))) {
+                fprintf(stderr,
+                        "[KISS] rejected connection from %s (not in allow-list)\n",
+                        ip);
+            }
+            close(fd);
             continue;
         }
 
-        return LHKT_ERR;
+        break;
     }
 
     if (peer && peer_size > 0) {
         if (inet_ntop(AF_INET, &addr.sin_addr, ip, sizeof(ip))) {
-            snprintf(peer, peer_size, "%s:%u", ip, (unsigned int)ntohs(addr.sin_port));
+            snprintf(peer, peer_size, "%s:%u", ip,
+                     (unsigned int)ntohs(addr.sin_port));
         } else {
             snprintf(peer, peer_size, "unknown");
         }

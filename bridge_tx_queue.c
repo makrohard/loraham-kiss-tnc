@@ -11,7 +11,7 @@
  * Actual socket writes and RX restore are kept in bridge.c.
  */
 
-static long bridge_tx_now_ms(void)
+static int64_t bridge_tx_now_ms(void)
 {
     struct timespec ts;
 
@@ -19,7 +19,7 @@ static long bridge_tx_now_ms(void)
         return 0;
     }
 
-    return (long)ts.tv_sec * 1000L + (long)(ts.tv_nsec / 1000000L);
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
 }
 
 void bridge_tx_queue_init(bridge_tx_queue_t *queue)
@@ -101,7 +101,7 @@ int bridge_tx_queue_push(bridge_tx_queue_t *queue,
 int bridge_tx_head_decision(const lhkt_config_t *cfg,
                             bridge_conf_state_t *conf_state,
                             bridge_tx_item_t *item,
-                            long now)
+                            int64_t now)
 {
     if (!cfg || !item) {
         return BRIDGE_TX_DECISION_DROP;
@@ -146,7 +146,7 @@ int lhkt_test_bridge_tx_decision(int tx_busy,
     lhkt_config_t cfg;
     bridge_conf_state_t conf_state;
     bridge_tx_item_t item;
-    long now;
+    int64_t now;
 
     lhkt_config_defaults(&cfg);
     bridge_conf_state_init(&conf_state);

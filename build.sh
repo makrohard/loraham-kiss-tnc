@@ -86,10 +86,14 @@ if [[ "$mode" == "clean" ]]; then
 fi
 
 CC="${CC:-gcc}"
-default_cflags="-Wall -Wextra -Wpedantic -Werror -std=c11 -I $script_dir"
+# Production defaults: warnings-as-errors + optimization + hardening
+# (FORTIFY needs optimization; stack protector + PIE/RELRO for the artifact).
+# Override with CFLAGS=..., or add sanitizers via CFLAGS_EXTRA for debugging.
+default_cflags="-Wall -Wextra -Wpedantic -Werror -std=c11 \
+-O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fPIE -I $script_dir"
 CFLAGS="${CFLAGS:-$default_cflags}"
 CFLAGS="${CFLAGS} ${CFLAGS_EXTRA:-}"
-LDFLAGS="${LDFLAGS:-} ${LDFLAGS_EXTRA:-}"
+LDFLAGS="${LDFLAGS:--pie -Wl,-z,relro,-z,now} ${LDFLAGS_EXTRA:-}"
 
 echo "[BUILD] component=$component"
 echo "[BUILD] CC=$CC"

@@ -16,8 +16,8 @@
 typedef struct {
     uint8_t packet[LHKT_LORAHAM_TX_MAX];
     size_t packet_len;
-    long queued_ms;
-    long tx_wait_start_ms;
+    int64_t queued_ms;
+    int64_t tx_wait_start_ms;
 } bridge_tx_item_t;
 
 typedef struct {
@@ -42,7 +42,7 @@ int bridge_tx_queue_push(bridge_tx_queue_t *queue,
 int bridge_tx_head_decision(const lhkt_config_t *cfg,
                             bridge_conf_state_t *conf_state,
                             bridge_tx_item_t *item,
-                            long now);
+                            int64_t now);
 
 #ifdef LHKT_TEST
 int lhkt_test_bridge_tx_decision(int tx_busy,

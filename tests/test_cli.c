@@ -287,8 +287,107 @@ static void test_help_exits_zero(void)
     assert(WEXITSTATUS(status) == 0);
 }
 
+static void test_bind_cidr(void)
+{
+    lhkt_config_t cfg;
+
+    /* default = loopback /32, listen loopback */
+    lhkt_config_defaults(&cfg);
+    assert(cfg.bind_prefix == 32);
+    assert(cfg.bind_net == 0x7F000001u);          /* 127.0.0.1 */
+    assert(strcmp(cfg.kiss_host, "127.0.0.1") == 0);
+
+    /* --bind a LAN CIDR: network masked, listen 0.0.0.0 */
+    {
+        char *argv[] = { "test_cli", "--bind", "192.168.178.0/24", NULL };
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+        assert(cfg.bind_prefix == 24);
+        assert(cfg.bind_net == 0xC0A8B200u);       /* 192.168.178.0 */
+        assert(strcmp(cfg.bind_spec, "192.168.178.0/24") == 0);
+        assert(strcmp(cfg.kiss_host, "0.0.0.0") == 0);
+    }
+
+    /* host bits are masked off */
+    {
+        char *argv[] = { "test_cli", "--bind", "192.168.178.55/24", NULL };
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+        assert(cfg.bind_net == 0xC0A8B200u);       /* .55 masked to .0 */
+    }
+
+    /* plain IP = /32 */
+    {
+        char *argv[] = { "test_cli", "--bind", "10.0.0.5", NULL };
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+        assert(cfg.bind_prefix == 32);
+        assert(cfg.bind_net == 0x0A000005u);
+        assert(strcmp(cfg.kiss_host, "0.0.0.0") == 0);
+    }
+
+    /* 0.0.0.0/0 = any, listen all */
+    {
+        char *argv[] = { "test_cli", "--bind", "0.0.0.0/0", NULL };
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+        assert(cfg.bind_prefix == 0);
+        assert(strcmp(cfg.kiss_host, "0.0.0.0") == 0);
+    }
+
+    /* loopback /8 stays loopback-listen */
+    {
+        char *argv[] = { "test_cli", "--bind", "127.0.0.0/8", NULL };
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+        assert(strcmp(cfg.kiss_host, "127.0.0.1") == 0);
+    }
+
+    /* invalid forms rejected */
+    {
+        char *bad1[] = { "test_cli", "--bind", "bogus", NULL };
+        char *bad2[] = { "test_cli", "--bind", "192.168.0.0/33", NULL };
+        char *bad3[] = { "test_cli", "--bind", "192.168.0.0/-1", NULL };
+        char *bad4[] = { "test_cli", "--bind", "1.2.3.4/", NULL };   /* empty prefix */
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(bad1), bad1, &cfg) != LHKT_OK);
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(bad2), bad2, &cfg) != LHKT_OK);
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(bad3), bad3, &cfg) != LHKT_OK);
+        lhkt_config_defaults(&cfg);
+        assert(lhkt_cli_apply(argc_of(bad4), bad4, &cfg) != LHKT_OK);
+    }
+}
+
+static void test_bind_membership(void)
+{
+    /* the accept-time filter helper */
+    assert(lhkt_ipv4_in_cidr(0xC0A8B237u, 0xC0A8B200u, 24) == 1); /* .55 in /24 */
+    assert(lhkt_ipv4_in_cidr(0xC0A8B301u, 0xC0A8B200u, 24) == 0); /* .179.1 out */
+    assert(lhkt_ipv4_in_cidr(0x7F000001u, 0x7F000001u, 32) == 1); /* exact /32 */
+    assert(lhkt_ipv4_in_cidr(0x08080808u, 0u, 0) == 1);           /* /0 any */
+    assert(lhkt_ipv4_in_cidr(0x0A000006u, 0x0A000005u, 32) == 0); /* /32 mismatch */
+}
+
+static void test_kiss_host_override(void)
+{
+    lhkt_config_t cfg;
+    /* explicit --kiss-host overrides the derived listen address; the source
+     * allow-list still comes from --bind. */
+    char *argv[] = { "test_cli", "--bind", "0.0.0.0/0",
+                     "--kiss-host", "192.168.1.5", NULL };
+    lhkt_config_defaults(&cfg);
+    assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+    assert(strcmp(cfg.kiss_host, "192.168.1.5") == 0);   /* explicit listen */
+    assert(cfg.bind_prefix == 0);                        /* allow any */
+}
+
 int main(void)
 {
+    test_bind_cidr();
+    test_bind_membership();
+    test_kiss_host_override();
     test_rx_only_and_port();
     test_config_and_cli_override();
     test_timing_options();
