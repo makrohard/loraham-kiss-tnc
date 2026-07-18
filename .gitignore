@@ -1,2 +1,3 @@
-# Local build output
+# Local build output (build.sh names the binary after the repo directory).
 /loraham_kiss_tnc
+/loraham-kiss-tnc

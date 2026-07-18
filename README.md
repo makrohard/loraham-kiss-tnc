@@ -1,5 +1,4 @@
 # LoRaHAM KISS TNC Bridge
-written by Johannes Loose 410733@gmail.com
 
 KISS/TCP TNC bridge for `LoRaHAM_Daemon`.
 
@@ -105,3 +104,7 @@ Make sure that the TNC listens on the network. For testing, you may use 0.0.0.0.
   --kiss-port 8001
 ```
 The included shell script ```start-serial-kiss.sh``` starts socat configured for local use.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Johannes Loose <410733@gmail.com>.
