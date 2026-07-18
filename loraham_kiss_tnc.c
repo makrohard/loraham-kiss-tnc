@@ -1,8 +1,21 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "loraham_kiss_tnc.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+
+/* systemd deployments serve the daemon sockets under /run/loraham, direct/user starts under /tmp
+ * (LORAHAM_SOCKET_DIR). Take the path where the daemon socket actually exists, else the /tmp
+ * fallback — mirrors the daemon's clients (lorachat/igate). Only the DEFAULT; an explicit
+ * --data-socket/--conf-socket (or config-file key) still overrides. */
+static const char *loraham_sockpath(const char *runp, const char *tmpp)
+{
+    struct stat st;
+    return (stat(runp, &st) == 0 && S_ISSOCK(st.st_mode)) ? runp : tmpp;
+}
 
 void lhkt_config_defaults(lhkt_config_t *cfg)
 {
@@ -15,8 +28,10 @@ void lhkt_config_defaults(lhkt_config_t *cfg)
     snprintf(cfg->kiss_host, sizeof(cfg->kiss_host), "%s", LHKT_DEFAULT_KISS_HOST);
     cfg->kiss_port = LHKT_DEFAULT_KISS_PORT;
 
-    snprintf(cfg->data_socket, sizeof(cfg->data_socket), "%s", LHKT_DEFAULT_DATA_SOCKET);
-    snprintf(cfg->conf_socket, sizeof(cfg->conf_socket), "%s", LHKT_DEFAULT_CONF_SOCKET);
+    snprintf(cfg->data_socket, sizeof(cfg->data_socket), "%s",
+             loraham_sockpath("/run/loraham/lora433f.sock", LHKT_DEFAULT_DATA_SOCKET));
+    snprintf(cfg->conf_socket, sizeof(cfg->conf_socket), "%s",
+             loraham_sockpath("/run/loraham/loraconf433.sock", LHKT_DEFAULT_CONF_SOCKET));
 
     cfg->rx_only = 0;
     cfg->verbose = 0;
