@@ -124,6 +124,41 @@ static void test_bad_escape_drops_frame(void)
     assert(kiss_decode_byte(&dec, 0x11, &frame) == LHKT_ERR_FORMAT);
 }
 
+/* A FEND arriving mid-escape (dangling FESC) is malformed: it must be dropped
+ * (LHKT_ERR_FORMAT), not silently completed, and it starts the next frame. */
+static void test_fend_mid_escape_drops_frame(void)
+{
+    kiss_decoder_t dec;
+    kiss_frame_t frame;
+    int ret;
+    size_t i;
+    const uint8_t valid[] = { 0x00, 0x42, KISS_FEND };
+    int got = 0;
+
+    kiss_decoder_init(&dec);
+    memset(&frame, 0, sizeof(frame));
+
+    assert(kiss_decode_byte(&dec, KISS_FEND, &frame) == 0);
+    assert(kiss_decode_byte(&dec, 0x00, &frame) == 0);
+    assert(kiss_decode_byte(&dec, KISS_FESC, &frame) == 0);
+    /* FEND while escaped: malformed, not a completed frame. */
+    assert(kiss_decode_byte(&dec, KISS_FEND, &frame) == LHKT_ERR_FORMAT);
+
+    /* The malformed FEND opened a fresh frame: a valid one now decodes. */
+    for (i = 0; i < sizeof(valid); i++) {
+        ret = kiss_decode_byte(&dec, valid[i], &frame);
+        if (ret == 1) {
+            got++;
+        } else {
+            assert(ret == 0);
+        }
+    }
+    assert(got == 1);
+    assert(frame.command == KISS_CMD_DATA);
+    assert(frame.data_len == 1);
+    assert(frame.data[0] == 0x42);
+}
+
 
 static void test_nonzero_port_decode(void)
 {
@@ -335,6 +370,7 @@ int main(void)
     test_ignore_empty_frames();
     test_command_params();
     test_bad_escape_drops_frame();
+    test_fend_mid_escape_drops_frame();
     test_nonzero_port_decode();
     test_bad_escape_discards_until_fend();
     test_bad_escape_recovers_next_frame();

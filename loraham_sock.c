@@ -72,6 +72,9 @@ ssize_t loraham_sock_read(int fd,
     return read(fd, buf, buf_size);
 }
 
+/* Local copy on purpose: loraham_sock is a standalone module (its own test
+ * binary links it without bridge_runtime), so it does not use
+ * bridge_runtime_now_ms(). */
 static int64_t loraham_sock_now_ms(void)
 {
     struct timespec ts;

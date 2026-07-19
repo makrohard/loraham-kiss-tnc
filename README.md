@@ -25,6 +25,8 @@ APRS client <-> KISS/TCP <-> loraham_kiss_tnc <-> framed DATA socket <-> loraham
 - framed DATA socket only for daemon packet I/O
 - requires `loraham_daemon` 110+ framed RX metadata layout
 - RX RSSI/SNR metadata is ignored and not forwarded to KISS clients
+- TX is synchronous: while a transmission is confirmed the bridge does not service KISS client input (bounded by tx_busy_timeout_ms)
+- Per-packet log lines require --verbose
 
 ## TX policy
 
@@ -62,7 +64,9 @@ Usage: ./loraham-kiss-tnc [OPTIONS]
 LoRaHAM KISS/TCP TNC bridge
 
 Options:
-  -c, --config FILE        Load config file
+  -c, --config FILE        Load config file. Accepts -c FILE, -cFILE, or
+                           --config=FILE; -c must not be grouped with other
+                           short options.
       --bind CIDR          Source allow-list: IPv4 or CIDR that may
                            connect. 127.0.0.1 (default, loopback),
                            192.168.0.0/24 (a LAN), 0.0.0.0/0 (any).
@@ -110,7 +114,8 @@ still comes from `--bind`.
 allowed to connect can transmit on your station and read received traffic.
 Keep the allow-list as narrow as possible; for access beyond a trusted LAN,
 prefer a VPN/SSH tunnel and leave `--bind 127.0.0.1`. Rejected peers are logged
-(`[KISS] rejected connection from <ip> (not in allow-list)`).
+(`[KISS] rejected connection from <ip> (not in allow-list)`) and do not affect
+bridging.
 
 ## Serial KISS
 

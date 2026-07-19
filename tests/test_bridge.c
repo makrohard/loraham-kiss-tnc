@@ -42,7 +42,6 @@ int lhkt_test_bridge_should_reconnect_data_socket(int ret);
 int lhkt_test_bridge_should_disconnect_kiss_client(int ret);
 int lhkt_test_bridge_should_reconnect_conf_socket(int ret);
 void lhkt_test_bridge_disconnect_data_socket(int *data_fd,
-                                             loraham_rx_state_t *rx_state,
                                              lhkt_stats_t *stats);
 void lhkt_test_bridge_reset_stop(void);
 void lhkt_test_bridge_request_stop(void);
@@ -443,14 +442,14 @@ static void test_txresult_terminal_failure_drops_packet(void)
     close(data_sv[1]);
 }
 
-static void test_txresult_missing_reconnects_without_restore(void)
+static void test_txresult_missing_restores_rx(void)
 {
     int data_sv[2];
     int conf_sv[2];
     static const uint8_t packet[] = {
         0x3c, 0xff, 0x01, 'T', 'E', 'S', 'T'
     };
-    int config_results[] = { LHKT_OK };
+    int config_results[] = { LHKT_OK, LHKT_OK };
     bridge_tx_queue_t queue;
     bridge_conf_state_t conf_state;
     loraham_framed_rx_state_t frame_state;
@@ -491,7 +490,13 @@ static void test_txresult_missing_reconnects_without_restore(void)
     assert(ret == LHKT_ERR_TX_RESULT);
     assert(bridge_loraham_should_reconnect_data_socket(ret) == 1);
     assert(queue.count == 0);
-    assert(lhkt_test_bridge_config_call_count() == 1);
+    /* A confirmation timeout still restores RX: the initial TX-freq apply is
+     * followed by an RX-freq apply (Change 4). */
+    assert(lhkt_test_bridge_config_call_count() == 2);
+    assert(lhkt_test_bridge_config_freq_at(0) > 433.899);
+    assert(lhkt_test_bridge_config_freq_at(0) < 433.901);
+    assert(lhkt_test_bridge_config_freq_at(1) > 433.774);
+    assert(lhkt_test_bridge_config_freq_at(1) < 433.776);
     assert(stats.loraham_tx == 0);
     assert(stats.tx_unconfirmed == 1);
 
@@ -1116,25 +1121,17 @@ static void test_tx_socket_error_invalidates_data_socket(void)
     int sv[2];
     int data_fd;
     lhkt_stats_t stats;
-    loraham_rx_state_t rx_state;
 
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
 
     data_fd = sv[0];
 
     lhkt_stats_init(&stats);
-    loraham_rx_state_init(&rx_state);
-    rx_state.seen_header = 1;
-    rx_state.len = 3;
-    rx_state.pending_len = 2;
 
-    lhkt_test_bridge_disconnect_data_socket(&data_fd, &rx_state, &stats);
+    lhkt_test_bridge_disconnect_data_socket(&data_fd, &stats);
 
     assert(data_fd == -1);
     assert(stats.socket_reconnects == 1);
-    assert(rx_state.seen_header == 0);
-    assert(rx_state.len == 0);
-    assert(rx_state.pending_len == 0);
 
     close(sv[1]);
 }
@@ -1196,6 +1193,89 @@ static void test_rx_restore_retry_failure_is_counted(void)
     assert(stats.loraham_tx == 0);
 }
 
+/* The framed decoder is owned by the data socket: it must survive a frame split
+ * across reads with no KISS client (dropping, not corrupting), and a later frame
+ * on the same decoder must still deliver — proving no stream desync. */
+static void test_framed_rx_survives_no_client(void)
+{
+    int sv[2];
+    ssize_t n;
+    uint8_t out_buf[LHKT_KISS_MAX_FRAME];
+    loraham_framed_rx_state_t state;
+    loraham_frame_t frame_obj;
+    lhkt_stats_t stats;
+    const char *tnc2 = "DJ0CHE-10>APRS:hi\n";
+    uint8_t frame[3 + 4 + LHKT_LORAHAM_HDR_LEN + 64];
+    size_t payload_len;
+    size_t pos;
+    size_t split;
+
+    assert(strlen(tnc2) < 64);
+
+    payload_len = 4 + LHKT_LORAHAM_HDR_LEN + strlen(tnc2);
+    pos = 0;
+    frame[pos++] = LORAHAM_FRAME_RX_PACKET;
+    frame[pos++] = (uint8_t)(payload_len & 0xff);
+    frame[pos++] = (uint8_t)((payload_len >> 8) & 0xff);
+    frame[pos++] = 0x00;
+    frame[pos++] = 0x00;
+    frame[pos++] = 0x00;
+    frame[pos++] = 0x00;
+    frame[pos++] = LORAHAM_APRS_HDR0;
+    frame[pos++] = LORAHAM_APRS_HDR1;
+    frame[pos++] = LORAHAM_APRS_HDR2;
+    memcpy(frame + pos, tnc2, strlen(tnc2));
+    pos += strlen(tnc2);
+    assert(pos == 3 + payload_len);
+
+    loraham_framed_rx_state_init(&state);
+    lhkt_stats_init(&stats);
+
+    /* Split across two reads, no client: one packet, dropped once, not corrupt. */
+    split = pos / 2;
+    assert(bridge_rx_handle_framed_chunk(-1, &state, frame, split, &stats) == LHKT_OK);
+    assert(bridge_rx_handle_framed_chunk(-1, &state, frame + split, pos - split,
+                                         &stats) == LHKT_OK);
+    assert(stats.loraham_rx == 0);
+    assert(stats.loraham_drop == 1);
+
+    /* Same decoder, now with a client: the next complete frame is delivered,
+     * proving the split above left the decoder aligned. */
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    assert(bridge_rx_handle_framed_chunk(sv[0], &state, frame, pos, &stats) == LHKT_OK);
+    n = read(sv[1], out_buf, sizeof(out_buf));
+    assert(n > 0);
+    assert(stats.loraham_rx == 1);
+    assert(stats.loraham_drop == 1);
+    close(sv[0]);
+    close(sv[1]);
+
+    /* Direct: RX_PACKET with client_fd < 0 => LHKT_OK, one drop. */
+    memset(&frame_obj, 0, sizeof(frame_obj));
+    frame_obj.type = LORAHAM_FRAME_RX_PACKET;
+    frame_obj.payload_len = payload_len;
+    memcpy(frame_obj.payload, frame + 3, payload_len);
+    lhkt_stats_init(&stats);
+    assert(bridge_rx_handle_framed_frame(-1, &frame_obj, &stats) == LHKT_OK);
+    assert(stats.loraham_drop == 1);
+    assert(stats.loraham_rx == 0);
+}
+
+/* An over-long CONF line must be dropped whole: its tail ("TX=1") must not
+ * parse as its own event once the line exceeds LHKT_CONF_LINE_MAX. */
+static void test_conf_overlong_line_is_discarded(void)
+{
+    char text[512];
+    int tx_busy = -1;
+    size_t pad = 300;
+
+    memset(text, 'X', pad);
+    snprintf(text + pad, sizeof(text) - pad, "TX=1\n");
+
+    assert(lhkt_test_bridge_conf_feed(text, &tx_busy, NULL, NULL, NULL) == LHKT_OK);
+    assert(tx_busy == 0);
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -1203,10 +1283,11 @@ int main(void)
     test_conf_status_parser();
     test_conf_event_transition_counters();
     test_conf_txresult_status_parser();
+    test_conf_overlong_line_is_discarded();
     test_txresult_ok_forwards_trailing_rx();
     test_txresult_client_write_failure_propagates();
     test_txresult_terminal_failure_drops_packet();
-    test_txresult_missing_reconnects_without_restore();
+    test_txresult_missing_restores_rx();
     test_txresult_disabled_reconnects_conf();
     test_conf_cad_stats_collection();
     test_tx_complete_handles_combined_events();
@@ -1223,6 +1304,7 @@ int main(void)
     test_tnc2_to_kiss_output();
     test_framed_rx_v110_metadata_is_stripped();
     test_framed_rx_short_metadata_is_dropped();
+    test_framed_rx_survives_no_client();
     test_framed_error_is_counted();
     test_nonzero_kiss_port_is_dropped();
     test_invalid_tnc2_is_dropped();

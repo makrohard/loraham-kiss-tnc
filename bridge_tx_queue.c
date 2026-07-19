@@ -1,26 +1,15 @@
-#define _POSIX_C_SOURCE 200809L
 #include "bridge_tx_queue.h"
+#include "bridge_runtime.h"
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /*
  * Outgoing LoRaHAM TX queue and TX-busy policy decisions.
  * Daemon 110 owns the final CAD gate before RF transmit.
  * Actual socket writes and RX restore are kept in bridge.c.
+ * Monotonic time comes from bridge_runtime_now_ms() (linked alongside).
  */
-
-static int64_t bridge_tx_now_ms(void)
-{
-    struct timespec ts;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
-        return 0;
-    }
-
-    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
-}
 
 void bridge_tx_queue_init(bridge_tx_queue_t *queue)
 {
@@ -92,7 +81,7 @@ int bridge_tx_queue_push(bridge_tx_queue_t *queue,
 
     memcpy(item->packet, packet, packet_len);
     item->packet_len = packet_len;
-    item->queued_ms = bridge_tx_now_ms();
+    item->queued_ms = bridge_runtime_now_ms();
     queue->count++;
 
     return LHKT_OK;
@@ -155,7 +144,7 @@ int lhkt_test_bridge_tx_decision(int tx_busy,
     conf_state.tx_busy = tx_busy;
     item.packet_len = 10;
 
-    now = bridge_tx_now_ms();
+    now = bridge_runtime_now_ms();
     item.queued_ms = now - (queued_age_ms >= 0 ? queued_age_ms : 0);
 
     if (tx_wait_age_ms >= 0) {

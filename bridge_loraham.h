@@ -50,7 +50,6 @@ void bridge_loraham_disconnect_conf_socket(int *conf_fd,
                                            const char *reason);
 
 void bridge_loraham_disconnect_data_socket(int *data_fd,
-                                           loraham_rx_state_t *rx_state,
                                            lhkt_stats_t *stats,
                                            const char *reason);
 
@@ -92,7 +91,6 @@ int lhkt_test_bridge_drain_pops_written_restore_failure(size_t *queue_depth,
 int lhkt_test_bridge_should_reconnect_data_socket(int ret);
 int lhkt_test_bridge_should_reconnect_conf_socket(int ret);
 void lhkt_test_bridge_disconnect_data_socket(int *data_fd,
-                                             loraham_rx_state_t *rx_state,
                                              lhkt_stats_t *stats);
 #endif
 

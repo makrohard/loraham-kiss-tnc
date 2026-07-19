@@ -31,7 +31,6 @@
  * One KISS/TCP client is bridged to one LoRaHAM daemon data socket.
  */
 
-#define LHKT_RX_IDLE_FLUSH_USEC 250000
 #define LHKT_RECONNECT_DELAY_SEC 1
 #define LHKT_CLIENT_WRITE_TIMEOUT_SEC 2
 #define LHKT_TX_RESTORE_RETRY_DELAY_MS 100
@@ -53,32 +52,6 @@ int lhkt_test_bridge_should_disconnect_kiss_client(int ret)
     return should_disconnect_kiss_client(ret);
 }
 #endif
-
-/* ---- Periodic stats ---- */
-
-static void print_stats_if_due(const lhkt_config_t *cfg,
-                               lhkt_stats_t *stats,
-                               time_t *next_stats)
-{
-    time_t now;
-
-    if (!cfg || !stats || !next_stats || cfg->stats_interval <= 0) {
-        return;
-    }
-
-    now = time(NULL);
-    if (*next_stats == 0) {
-        *next_stats = now + cfg->stats_interval;
-        return;
-    }
-
-    if (now < *next_stats) {
-        return;
-    }
-
-    lhkt_stats_print(stats);
-    *next_stats = now + cfg->stats_interval;
-}
 
 /* ---- Unit-test entry points ---- */
 
@@ -111,16 +84,13 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
     fd_set rfds;
     struct timeval tv;
     struct timeval *timeout;
-    time_t next_stats;
-    time_t now;
-    long stats_wait;
+    int64_t next_stats_ms;
     unsigned long cad_stats_busy_seq;
     unsigned long cad_stats_idle_seq;
 
     kiss_decoder_t kiss_dec;
     kiss_frame_t kiss_frame;
     kiss_params_t kiss_params;
-    loraham_rx_state_t lora_rx;
     loraham_framed_rx_state_t lora_framed_rx;
     bridge_conf_state_t conf_state;
     bridge_tx_queue_t tx_queue;
@@ -134,13 +104,12 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
     listen_fd = -1;
     client_fd = -1;
     config_ok = 0;
-    next_stats = 0;
+    next_stats_ms = 0;
     cad_stats_busy_seq = 0;
     cad_stats_idle_seq = 0;
 
     kiss_decoder_init(&kiss_dec);
     kiss_params_init(&kiss_params);
-    loraham_rx_state_init(&lora_rx);
     loraham_framed_rx_state_init(&lora_framed_rx);
     bridge_conf_state_init(&conf_state);
     bridge_tx_queue_init(&tx_queue);
@@ -186,8 +155,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
     printf("[KISS] Waiting for client...\n");
 
     while (!bridge_runtime_should_stop()) {
-        print_stats_if_due(cfg, stats, &next_stats);
-
         ret = bridge_loraham_tx_queue_drain_with_client(
             cfg,
             stats,
@@ -199,7 +166,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
             &lora_framed_rx);
         if (bridge_loraham_should_reconnect_data_socket(ret)) {
             bridge_loraham_disconnect_data_socket(&data_fd,
-                                           &lora_rx,
                                            stats,
                                            "TX write failed");
             loraham_framed_rx_state_init(&lora_framed_rx);
@@ -216,8 +182,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
             client_fd = -1;
             kiss_decoder_init(&kiss_dec);
             kiss_params_init(&kiss_params);
-            loraham_rx_state_init(&lora_rx);
-            loraham_framed_rx_state_init(&lora_framed_rx);
             printf("[KISS] Waiting for client...\n");
         }
 
@@ -274,25 +238,38 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
             timeout = &tv;
         }
 
+        /* Periodic stats on a MONOTONIC clock (immune to wall-clock/NTP steps):
+         * print when due, then clamp the select timeout to the next due time so
+         * the loop wakes on schedule. */
         if (stats && cfg->stats_interval > 0) {
-            now = time(NULL);
-            if (next_stats == 0) {
-                next_stats = now + cfg->stats_interval;
+            int64_t now_ms = bridge_runtime_now_ms();
+            int64_t interval_ms = (int64_t)cfg->stats_interval * 1000;
+            int64_t remaining_ms;
+            long wait_sec;
+            long wait_usec;
+
+            if (next_stats_ms == 0) {
+                next_stats_ms = now_ms + interval_ms;
             }
 
-            if (next_stats <= now) {
-                tv.tv_sec = 0;
-                tv.tv_usec = 0;
+            if (now_ms >= next_stats_ms) {
+                lhkt_stats_print(stats);
+                next_stats_ms = now_ms + interval_ms;
+            }
+
+            remaining_ms = next_stats_ms - now_ms;
+            if (remaining_ms < 0) {
+                remaining_ms = 0;
+            }
+            wait_sec = (long)(remaining_ms / 1000);
+            wait_usec = (long)((remaining_ms % 1000) * 1000);
+
+            if (!timeout ||
+                tv.tv_sec > wait_sec ||
+                (tv.tv_sec == wait_sec && tv.tv_usec > wait_usec)) {
+                tv.tv_sec = wait_sec;
+                tv.tv_usec = wait_usec;
                 timeout = &tv;
-            } else {
-                stats_wait = (long)(next_stats - now);
-                if (!timeout ||
-                    tv.tv_sec > stats_wait ||
-                    (tv.tv_sec == stats_wait && tv.tv_usec > 0)) {
-                    tv.tv_sec = stats_wait;
-                    tv.tv_usec = 0;
-                    timeout = &tv;
-                }
             }
         }
 
@@ -328,6 +305,9 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                         stats->socket_reconnects++;
                     }
 
+                    /* Fresh data socket => fresh framed stream. */
+                    loraham_framed_rx_state_init(&lora_framed_rx);
+
                     if (bridge_loraham_send_initial_config_with_state(cfg, conf_fd, &conf_state) == LHKT_OK) {
                         config_ok = 1;
                     } else {
@@ -344,21 +324,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                 continue;
             }
 
-            ret = bridge_rx_handle_loraham_chunk(client_fd,
-                                                &lora_rx,
-                                                NULL,
-                                                0,
-                                                stats);
-            if (should_disconnect_kiss_client(ret)) {
-                printf("[KISS] Client write failed, disconnecting\n");
-                lhkt_tcp_server_close(client_fd);
-                client_fd = -1;
-                kiss_decoder_init(&kiss_dec);
-                kiss_params_init(&kiss_params);
-                loraham_rx_state_init(&lora_rx);
-                loraham_framed_rx_state_init(&lora_framed_rx);
-                printf("[KISS] Waiting for client...\n");
-            }
             continue;
         }
 
@@ -366,17 +331,20 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
             client_fd = lhkt_tcp_server_accept(listen_fd,
                                                cfg->bind_net, cfg->bind_prefix,
                                                peer, sizeof(peer));
+            if (client_fd == LHKT_ERR_AGAIN) {
+                /* Nothing accepted, or the peer was rejected by the allow-list
+                 * (already logged in the accept): just re-select. */
+                client_fd = -1;
+                continue;
+            }
             if (client_fd < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
                 /* On fd exhaustion (EMFILE/ENFILE/ENOBUFS/ENOMEM) the pending
                  * connection stays in the backlog and select() would report
                  * the listen fd readable again immediately — back off briefly
                  * to avoid a 100% CPU spin until an fd frees up. */
                 fprintf(stderr, "[ERR] KISS/TCP accept failed\n");
                 bridge_runtime_sleep_ms(100);
+                client_fd = -1;
                 continue;
             }
 
@@ -389,8 +357,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
 
             kiss_decoder_init(&kiss_dec);
             kiss_params_init(&kiss_params);
-            loraham_rx_state_init(&lora_rx);
-            loraham_framed_rx_state_init(&lora_framed_rx);
 
             printf("[KISS] Client connected: %s\n", peer);
         }
@@ -409,8 +375,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                 client_fd = -1;
                 kiss_decoder_init(&kiss_dec);
                 kiss_params_init(&kiss_params);
-                loraham_rx_state_init(&lora_rx);
-                loraham_framed_rx_state_init(&lora_framed_rx);
                 printf("[KISS] Waiting for client...\n");
                 continue;
             }
@@ -425,8 +389,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                 client_fd = -1;
                 kiss_decoder_init(&kiss_dec);
                 kiss_params_init(&kiss_params);
-                loraham_rx_state_init(&lora_rx);
-                loraham_framed_rx_state_init(&lora_framed_rx);
                 printf("[KISS] Waiting for client...\n");
                 continue;
             }
@@ -450,7 +412,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                                                    &tx_queue);
                     if (bridge_loraham_should_reconnect_data_socket(ret)) {
                         bridge_loraham_disconnect_data_socket(&data_fd,
-                                                       &lora_rx,
                                                        stats,
                                                        "TX write failed");
                         loraham_framed_rx_state_init(&lora_framed_rx);
@@ -497,7 +458,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                 }
 
                 bridge_loraham_disconnect_data_socket(&data_fd,
-                                               &lora_rx,
                                                stats,
                                                "read failed");
                 loraham_framed_rx_state_init(&lora_framed_rx);
@@ -507,7 +467,6 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
 
             if (n == 0) {
                 bridge_loraham_disconnect_data_socket(&data_fd,
-                                               &lora_rx,
                                                stats,
                                                "closed");
                 loraham_framed_rx_state_init(&lora_framed_rx);
@@ -519,31 +478,31 @@ int lhkt_bridge_run(const lhkt_config_t *cfg, lhkt_stats_t *stats)
                 printf("[LoRaHAM] %zd bytes received\n", n);
             }
 
-            if (client_fd < 0) {
-                loraham_rx_state_init(&lora_rx);
+            /* Always decode the daemon stream so the framed decoder stays in
+             * sync with the data socket, even with no KISS client attached
+             * (bridge_rx_handle_framed_frame drops RX packets when client_fd<0).
+             * The decoder state is owned by the data socket, never reset on a
+             * KISS client lifecycle event. */
+            ret = bridge_rx_handle_framed_chunk(client_fd,
+                                               &lora_framed_rx,
+                                               buf,
+                                               (size_t)n,
+                                               stats);
+            if (should_disconnect_kiss_client(ret)) {
+                printf("[KISS] Client write failed, disconnecting\n");
+                lhkt_tcp_server_close(client_fd);
+                client_fd = -1;
+                kiss_decoder_init(&kiss_dec);
+                kiss_params_init(&kiss_params);
+                printf("[KISS] Waiting for client...\n");
+            } else if (ret < 0) {
+                /* Framed decode error (stream desync): reconnect the data
+                 * socket to resync, as the wait_tx_result path already does. */
+                bridge_loraham_disconnect_data_socket(&data_fd, stats,
+                                                      "framed decode error");
                 loraham_framed_rx_state_init(&lora_framed_rx);
-                if (stats) {
-                    stats->loraham_drop++;
-                }
-
-                if (cfg->verbose) {
-                    printf("[LoRaHAM] RX drop: no KISS client\n");
-                }
-            } else {
-                ret = bridge_rx_handle_framed_chunk(client_fd,
-                                                   &lora_framed_rx,
-                                                   buf,
-                                                   (size_t)n,
-                                                   stats);
-                if (should_disconnect_kiss_client(ret)) {
-                    printf("[KISS] Client write failed, disconnecting\n");
-                    lhkt_tcp_server_close(client_fd);
-                    client_fd = -1;
-                    kiss_decoder_init(&kiss_dec);
-                    kiss_params_init(&kiss_params);
-                    loraham_rx_state_init(&lora_rx);
-                    printf("[KISS] Waiting for client...\n");
-                }
+                config_ok = 0;
+                continue;
             }
         }
     }

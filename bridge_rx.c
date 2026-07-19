@@ -137,7 +137,9 @@ int bridge_rx_send_tnc2_to_kiss_client(int client_fd,
         return LHKT_ERR;
     }
 
-    printf("[TNC2 RX] %s\n", tnc2);
+    if (lhkt_log_verbose()) {
+        printf("[TNC2 RX] %s\n", tnc2);
+    }
 
     ret = tnc2_parse_line(tnc2, &ax25);
     if (ret != LHKT_OK) {
@@ -194,7 +196,9 @@ int bridge_rx_send_tnc2_to_kiss_client(int client_fd,
         stats->kiss_tx++;
     }
 
-    printf("[KISS] Sent RX frame to client len=%zu\n", kiss_len);
+    if (lhkt_log_verbose()) {
+        printf("[KISS] Sent RX frame to client len=%zu\n", kiss_len);
+    }
 
     return LHKT_OK;
 }
@@ -300,6 +304,19 @@ int bridge_rx_handle_framed_frame(int client_fd,
     }
 
     if (frame->type == LORAHAM_FRAME_RX_PACKET) {
+        if (client_fd < 0) {
+            /* Frame was decoded to keep the daemon stream in sync, but there is
+             * no KISS client to deliver it to: drop it (counted). */
+            if (stats) {
+                stats->loraham_drop++;
+            }
+
+            if (lhkt_log_verbose()) {
+                printf("[LoRaHAM] RX drop: no KISS client\n");
+            }
+            return LHKT_OK;
+        }
+
         if (frame->payload_len < BRIDGE_RX_LORAHAM_META_LEN) {
             if (stats) {
                 stats->loraham_drop++;

@@ -61,6 +61,18 @@ void lhkt_config_defaults(lhkt_config_t *cfg)
     cfg->power = 17;
 }
 
+static int g_log_verbose = 0;
+
+void lhkt_log_set_verbose(int on)
+{
+    g_log_verbose = on ? 1 : 0;
+}
+
+int lhkt_log_verbose(void)
+{
+    return g_log_verbose;
+}
+
 void lhkt_stats_init(lhkt_stats_t *stats)
 {
     if (!stats) {

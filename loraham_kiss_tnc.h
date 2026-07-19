@@ -36,6 +36,9 @@
 #define LHKT_ERR_CLIENT_SOCKET -8
 #define LHKT_ERR_CONF_SOCKET   -9
 #define LHKT_ERR_TX_RESULT    -10
+/* Transient: nothing accepted, or the peer was rejected by the allow-list.
+ * The caller returns to the select loop silently (no log, no backoff). */
+#define LHKT_ERR_AGAIN        -11
 
 typedef struct {
     char kiss_host[LHKT_HOST_MAX];   /* listen bind address (derived from bind,
@@ -120,5 +123,10 @@ int  lhkt_ipv4_in_cidr(uint32_t addr_host, uint32_t net_host, int prefix);
 
 void lhkt_stats_init(lhkt_stats_t *stats);
 void lhkt_stats_print(const lhkt_stats_t *stats);
+
+/* Process-wide verbose flag (single-threaded). Per-packet log lines are gated
+ * behind it; drops, errors, warnings and state changes are always logged. */
+void lhkt_log_set_verbose(int on);
+int  lhkt_log_verbose(void);
 
 #endif

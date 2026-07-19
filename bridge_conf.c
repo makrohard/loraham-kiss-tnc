@@ -102,7 +102,9 @@ static void bridge_conf_handle_line(bridge_conf_state_t *state,
         } else {
             state->tx_idle_seq++;
         }
-        printf("[CONF] TX=%d\n", value);
+        if (lhkt_log_verbose()) {
+            printf("[CONF] TX=%d\n", value);
+        }
         return;
     }
 
@@ -114,7 +116,9 @@ static void bridge_conf_handle_line(bridge_conf_state_t *state,
         } else {
             state->cad_idle_seq++;
         }
-        printf("[CONF] CAD=%d\n", value);
+        if (lhkt_log_verbose()) {
+            printf("[CONF] CAD=%d\n", value);
+        }
         return;
     }
 
@@ -165,13 +169,26 @@ void bridge_conf_feed(bridge_conf_state_t *state,
         }
 
         if (c == '\n') {
+            if (state->discard) {
+                /* End of an over-long line: drop it whole so its tail cannot
+                 * parse as its own event (e.g. a trailing "TX=1"). */
+                state->discard = 0;
+                state->line_len = 0;
+                continue;
+            }
+
             state->line[state->line_len] = '\0';
             bridge_conf_handle_line(state, state->line);
             state->line_len = 0;
             continue;
         }
 
+        if (state->discard) {
+            continue;   /* still skipping until the next newline */
+        }
+
         if (state->line_len + 1 >= sizeof(state->line)) {
+            state->discard = 1;
             state->line_len = 0;
             continue;
         }

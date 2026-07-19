@@ -136,6 +136,14 @@ static const char *find_config_arg(int argc, char **argv)
         if (strncmp(argv[i], "--config=", 9) == 0) {
             return argv[i] + 9;
         }
+
+        /* Attached short form -cFILE (getopt accepts it, but the "-c" strcmp
+         * above only matched the separated "-c FILE"). Excludes "--config…"
+         * (starts with "--", so argv[i][1] != 'c') and grouped short options
+         * like "-vc FILE" (unsupported for config detection, by design). */
+        if (argv[i][0] == '-' && argv[i][1] == 'c' && argv[i][2] != '\0') {
+            return argv[i] + 2;
+        }
     }
 
     return NULL;

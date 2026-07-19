@@ -100,6 +100,15 @@ int kiss_decode_byte(kiss_decoder_t *dec,
             return 0;
         }
 
+        if (dec->escaped) {
+            /* FEND mid-escape: the preceding FESC is dangling, so the frame is
+             * malformed. Drop it, but treat this FEND as the start of the next
+             * frame rather than silently completing the broken one. */
+            kiss_decoder_drop_frame(dec);
+            dec->in_frame = 1;
+            return LHKT_ERR_FORMAT;
+        }
+
         ret = kiss_make_frame(dec, out);
         kiss_decoder_reset_frame(dec);
         return ret;

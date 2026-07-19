@@ -16,6 +16,9 @@ int main(int argc, char **argv)
     lhkt_stats_t stats;
     int ret;
 
+    /* Line-buffered so logs arrive promptly under journald/pipes (stdout is
+     * fully buffered when not a TTY) and are not lost on an abnormal exit. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     signal(SIGPIPE, SIG_IGN);
 
     lhkt_config_defaults(&cfg);
@@ -25,6 +28,8 @@ int main(int argc, char **argv)
     if (ret != LHKT_OK) {
         return 1;
     }
+
+    lhkt_log_set_verbose(cfg.verbose);
 
     printf("[Init] LoRaHAM KISS TNC bridge\n");
     lhkt_cli_print_config(&cfg);

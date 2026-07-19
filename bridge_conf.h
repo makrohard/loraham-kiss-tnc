@@ -23,6 +23,7 @@ typedef struct {
     unsigned long cad_idle_seq;
     char line[LHKT_CONF_LINE_MAX];
     size_t line_len;
+    int discard;                /* skipping the tail of an over-long line */
 } bridge_conf_state_t;
 
 void bridge_conf_state_init(bridge_conf_state_t *state);

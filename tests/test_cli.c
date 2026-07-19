@@ -70,6 +70,31 @@ static void test_config_and_cli_override(void)
 }
 
 
+static void test_config_attached_short_form(void)
+{
+    const char *path = "/tmp/lhkt_cli_attached.conf";
+    FILE *fp;
+    lhkt_config_t cfg;
+    char *argv[] = {
+        "test_cli",
+        "-c/tmp/lhkt_cli_attached.conf",
+        NULL
+    };
+
+    fp = fopen(path, "w");
+    assert(fp != NULL);
+    fprintf(fp, "kiss_port = 8123\n");
+    fclose(fp);
+
+    lhkt_config_defaults(&cfg);
+
+    /* The attached -cFILE form must load the file (previously silently ignored). */
+    assert(lhkt_cli_apply(argc_of(argv), argv, &cfg) == LHKT_OK);
+    assert(cfg.kiss_port == 8123);
+
+    unlink(path);
+}
+
 static void test_timing_options(void)
 {
     lhkt_config_t cfg;
@@ -273,8 +298,12 @@ static void test_help_exits_zero(void)
     if (pid == 0) {
         lhkt_config_t cfg;
 
-        freopen("/dev/null", "w", stdout);
-        freopen("/dev/null", "w", stderr);
+        if (!freopen("/dev/null", "w", stdout)) {
+            _exit(1);
+        }
+        if (!freopen("/dev/null", "w", stderr)) {
+            _exit(1);
+        }
 
         lhkt_config_defaults(&cfg);
         lhkt_cli_apply(argc_of(argv), argv, &cfg);
@@ -390,6 +419,7 @@ int main(void)
     test_kiss_host_override();
     test_rx_only_and_port();
     test_config_and_cli_override();
+    test_config_attached_short_form();
     test_timing_options();
     test_queue_policy_options();
     test_invalid_timing_option();

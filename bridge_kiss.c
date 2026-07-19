@@ -56,7 +56,9 @@ static int bridge_kiss_handle_data_frame(const kiss_frame_t *kiss_frame,
         stats->tnc2_tx++;
     }
 
-    printf("[TNC2 TX] %s\n", tnc2);
+    if (lhkt_log_verbose()) {
+        printf("[TNC2 TX] %s\n", tnc2);
+    }
 
     {
         uint8_t lora_pkt[LHKT_LORAHAM_TX_MAX];
@@ -96,9 +98,11 @@ static int bridge_kiss_handle_data_frame(const kiss_frame_t *kiss_frame,
             return ret;
         }
 
-        printf("[TXQ] Queued packet len=%zu depth=%zu\n",
-               lora_len,
-               tx_queue ? tx_queue->count : 0);
+        if (lhkt_log_verbose()) {
+            printf("[TXQ] Queued packet len=%zu depth=%zu\n",
+                   lora_len,
+                   tx_queue ? tx_queue->count : 0);
+        }
     }
 
     return LHKT_OK;
@@ -119,9 +123,11 @@ int bridge_kiss_handle_frame(const kiss_frame_t *kiss_frame,
     kiss_handle_command(kiss_params, kiss_frame);
 
     if (kiss_frame->command == KISS_CMD_DATA) {
-        printf("[KISS] Data frame: port=%u len=%zu\n",
-               kiss_frame->port,
-               kiss_frame->data_len);
+        if (lhkt_log_verbose()) {
+            printf("[KISS] Data frame: port=%u len=%zu\n",
+                   kiss_frame->port,
+                   kiss_frame->data_len);
+        }
 
         if (kiss_frame->port != 0) {
             if (stats) {

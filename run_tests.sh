@@ -137,6 +137,11 @@ run_test kiss \
   "$script_dir/kiss.c" \
   "$tests_dir/test_kiss.c"
 
+run_test tcp_server \
+  "$script_dir/loraham_kiss_tnc.c" \
+  "$script_dir/tcp_server.c" \
+  "$tests_dir/test_tcp_server.c"
+
 run_test cli \
   "$script_dir/loraham_kiss_tnc.c" \
   "$script_dir/config.c" \

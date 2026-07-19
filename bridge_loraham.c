@@ -357,7 +357,6 @@ void bridge_loraham_disconnect_conf_socket(int *conf_fd,
 }
 
 void bridge_loraham_disconnect_data_socket(int *data_fd,
-                                           loraham_rx_state_t *rx_state,
                                            lhkt_stats_t *stats,
                                            const char *reason)
 {
@@ -371,10 +370,6 @@ void bridge_loraham_disconnect_data_socket(int *data_fd,
 
     lhkt_tcp_server_close(*data_fd);
     *data_fd = -1;
-
-    if (rx_state) {
-        loraham_rx_state_init(rx_state);
-    }
 
     if (stats) {
         stats->socket_reconnects++;
@@ -393,10 +388,9 @@ int lhkt_test_bridge_should_reconnect_conf_socket(int ret)
 }
 
 void lhkt_test_bridge_disconnect_data_socket(int *data_fd,
-                                             loraham_rx_state_t *rx_state,
                                              lhkt_stats_t *stats)
 {
-    bridge_loraham_disconnect_data_socket(data_fd, rx_state, stats, "test");
+    bridge_loraham_disconnect_data_socket(data_fd, stats, "test");
 }
 #endif
 
@@ -604,22 +598,13 @@ static int bridge_loraham_wait_tx_result(
                                 continue;
                             }
 
-                            if (client_fd >= 0) {
-                                ret = bridge_rx_handle_framed_frame(
-                                    client_fd, &frame, stats);
-                                if (ret == LHKT_ERR_CLIENT_SOCKET) {
-                                    if (client_error) {
-                                        *client_error = ret;
-                                    }
-                                    client_fd = -1;
+                            ret = bridge_rx_handle_framed_frame(
+                                client_fd, &frame, stats);
+                            if (ret == LHKT_ERR_CLIENT_SOCKET) {
+                                if (client_error) {
+                                    *client_error = ret;
                                 }
-                            } else if (frame.type == LORAHAM_FRAME_RX_PACKET) {
-                                if (stats) {
-                                    stats->loraham_drop++;
-                                }
-                            } else {
-                                (void)bridge_rx_handle_framed_frame(
-                                    -1, &frame, stats);
+                                client_fd = -1;
                             }
                         } else if (frame_ret < 0) {
                             if (stats) {
@@ -632,22 +617,12 @@ static int bridge_loraham_wait_tx_result(
                     return LHKT_OK;
                 }
 
-                if (client_fd >= 0) {
-                    ret = bridge_rx_handle_framed_frame(client_fd,
-                                                        &frame,
-                                                        stats);
-                    if (ret == LHKT_ERR_CLIENT_SOCKET) {
-                        if (client_error) {
-                            *client_error = ret;
-                        }
-                        client_fd = -1;
+                ret = bridge_rx_handle_framed_frame(client_fd, &frame, stats);
+                if (ret == LHKT_ERR_CLIENT_SOCKET) {
+                    if (client_error) {
+                        *client_error = ret;
                     }
-                } else if (frame.type == LORAHAM_FRAME_RX_PACKET) {
-                    if (stats) {
-                        stats->loraham_drop++;
-                    }
-                } else {
-                    (void)bridge_rx_handle_framed_frame(-1, &frame, stats);
+                    client_fd = -1;
                 }
             } else if (frame_ret < 0) {
                 if (stats) {
@@ -766,6 +741,10 @@ static int bridge_loraham_send_packet_with_client(
 
             /* Auftrag kann noch laufen. */
             printf("[LoRaHAM] TX_RESULT missing or invalid\n");
+            /* Still restore RX so a confirmation timeout does not leave the
+             * radio parked on the TX frequency (its own failure is counted
+             * inside; the returned error is unchanged). */
+            (void)bridge_loraham_restore_rx_freq(cfg, stats, conf_fd);
             return LHKT_ERR_TX_RESULT;
         }
 

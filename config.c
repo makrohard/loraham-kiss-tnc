@@ -56,7 +56,7 @@ static int copy_string(char *dst, size_t dst_size, const char *src)
 
 static int parse_long_value(const char *text, long min, long max, long *out)
 {
-    char *end;
+    char *end = NULL;
     long value;
 
     if (!text || !out || text[0] == '\0') {
@@ -67,6 +67,9 @@ static int parse_long_value(const char *text, long min, long max, long *out)
     value = strtol(text, &end, 0);
 
     if (errno != 0) {
+        return LHKT_ERR_FORMAT;
+    }
+    if (!end) {
         return LHKT_ERR_FORMAT;
     }
 
@@ -86,7 +89,7 @@ static int parse_long_value(const char *text, long min, long max, long *out)
 
 static int parse_double_value(const char *text, double min, double max, double *out)
 {
-    char *end;
+    char *end = NULL;
     double value;
 
     if (!text || !out || text[0] == '\0') {
@@ -97,6 +100,9 @@ static int parse_double_value(const char *text, double min, double max, double *
     value = strtod(text, &end);
 
     if (errno != 0) {
+        return LHKT_ERR_FORMAT;
+    }
+    if (!end) {
         return LHKT_ERR_FORMAT;
     }
 

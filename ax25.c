@@ -192,6 +192,12 @@ static int ax25_decode_addr(const uint8_t *data, ax25_addr_t *addr)
         return LHKT_ERR_FORMAT;
     }
 
+    /* A space is valid only as trailing padding (stripped above); an embedded
+     * space is a malformed callsign. */
+    if (strchr(addr->call, ' ')) {
+        return LHKT_ERR_FORMAT;
+    }
+
     addr->ssid = (data[6] >> 1) & 0x0f;
     addr->repeated = (data[6] & 0x80) ? 1 : 0;
 
