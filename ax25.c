@@ -12,7 +12,25 @@
 /*
  * This module handles only AX.25 UI frames for APRS.
  * It does not use Linux kernel AX.25 and does not implement connected mode.
+ *
+ * SSID byte layout (AX.25 2.2, section 3.12):
+ *
+ *   bit 7    dst/src: command/response (C) bit
+ *            path:    has-been-repeated (H) bit
+ *   bit 6-5  reserved, transmitted as 1
+ *   bit 4-1  SSID
+ *   bit 0    address extension, set on the last address
+ *
+ * Bit 7 therefore means two different things depending on where the address
+ * sits. APRS sends UI frames as commands, so a conforming sender sets C=1 on
+ * the destination and C=0 on the source (Dire Wolf, aprx and graywolf all do).
+ * Only path addresses carry the '*' repeated marker; rendering a set C bit as
+ * '*' would put a bogus "DST*" into the TNC2 line and onto the air.
  */
+#define AX25_ADDR_BIT7      0x80
+#define AX25_ADDR_RESERVED  0x60
+#define AX25_ADDR_LAST      0x01
+#define AX25_ADDR_SSID_MASK 0x0f
 
 void ax25_frame_init(ax25_frame_t *frame)
 {
@@ -128,8 +146,10 @@ int ax25_addr_format(const ax25_addr_t *addr, char *out, size_t out_size)
     return LHKT_OK;
 }
 
+/* bit7: C bit for dst/src, H bit for path addresses. */
 static int ax25_encode_addr(const ax25_addr_t *addr,
                             int last,
+                            int bit7,
                             uint8_t *out)
 {
     size_t i;
@@ -144,20 +164,23 @@ static int ax25_encode_addr(const ax25_addr_t *addr,
         out[i] = (uint8_t)((uint8_t)c << 1);
     }
 
-    out[6] = 0x60 | ((addr->ssid & 0x0f) << 1);
+    out[6] = AX25_ADDR_RESERVED |
+             (uint8_t)((addr->ssid & AX25_ADDR_SSID_MASK) << 1);
 
-    if (addr->repeated) {
-        out[6] |= 0x80;
+    if (bit7) {
+        out[6] |= AX25_ADDR_BIT7;
     }
 
     if (last) {
-        out[6] |= 0x01;
+        out[6] |= AX25_ADDR_LAST;
     }
 
     return LHKT_OK;
 }
 
-static int ax25_decode_addr(const uint8_t *data, ax25_addr_t *addr)
+/* is_path selects the bit 7 meaning: H bit on path addresses, C bit on
+ * dst/src. A C bit is a sender/receiver role marker, never a '*'. */
+static int ax25_decode_addr(const uint8_t *data, int is_path, ax25_addr_t *addr)
 {
     size_t i;
     size_t len;
@@ -198,8 +221,8 @@ static int ax25_decode_addr(const uint8_t *data, ax25_addr_t *addr)
         return LHKT_ERR_FORMAT;
     }
 
-    addr->ssid = (data[6] >> 1) & 0x0f;
-    addr->repeated = (data[6] & 0x80) ? 1 : 0;
+    addr->ssid = (data[6] >> 1) & AX25_ADDR_SSID_MASK;
+    addr->repeated = (is_path && (data[6] & AX25_ADDR_BIT7)) ? 1 : 0;
 
     return LHKT_OK;
 }
@@ -242,13 +265,24 @@ int ax25_encode_ui(const ax25_frame_t *frame,
 
     pos = 0;
 
-    ret = ax25_encode_addr(&frame->dst, (addr_count == 1), out + pos);
+    /* UI frames are commands: C=1 on the destination, C=0 on the source. The
+     * dst/src repeated flags are deliberately ignored; '*' is path-only.
+     *
+     * Commands only, by scope: this bridge carries APRS, where every frame is a
+     * UI command. A UI *response* (dst C=0 / src C=1) and AX.25 2.0 framing (both
+     * C bits 0) are therefore not representable — the frame model has no field for
+     * it, and inventing one would let a caller emit non-APRS framing onto the air.
+     *
+     * The destination is never the final address (a frame always has a source), so
+     * its extension bit is unconditionally 0.
+     */
+    ret = ax25_encode_addr(&frame->dst, 0, 1, out + pos);
     if (ret != LHKT_OK) {
         return ret;
     }
     pos += AX25_ADDR_LEN;
 
-    ret = ax25_encode_addr(&frame->src, (frame->path_len == 0), out + pos);
+    ret = ax25_encode_addr(&frame->src, (frame->path_len == 0), 0, out + pos);
     if (ret != LHKT_OK) {
         return ret;
     }
@@ -257,6 +291,7 @@ int ax25_encode_ui(const ax25_frame_t *frame,
     for (i = 0; i < frame->path_len; i++) {
         ret = ax25_encode_addr(&frame->path[i],
                                (i + 1 == frame->path_len),
+                               frame->path[i].repeated,
                                out + pos);
         if (ret != LHKT_OK) {
             return ret;
@@ -303,12 +338,14 @@ int ax25_decode_ui(const uint8_t *data,
 
     while (pos + AX25_ADDR_LEN <= data_len &&
            addr_count < LHKT_AX25_MAX_ADDRS) {
-        ret = ax25_decode_addr(data + pos, &addrs[addr_count]);
+        ret = ax25_decode_addr(data + pos,
+                               (addr_count >= 2),
+                               &addrs[addr_count]);
         if (ret != LHKT_OK) {
             return ret;
         }
 
-        last = data[pos + 6] & 0x01;
+        last = data[pos + 6] & AX25_ADDR_LAST;
         pos += AX25_ADDR_LEN;
         addr_count++;
 

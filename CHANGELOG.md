@@ -8,6 +8,12 @@
   64-bit millisecond timestamps (no 32-bit wrap); SIGINT/SIGTERM via sigaction;
   bounded main-loop select timeout; production build flags (-O2, _FORTIFY_SOURCE,
   stack protector, PIE/RELRO/BIND_NOW).
+- Fix: AX.25 bit 7 is position-dependent — the command/response bit on dst/src, the
+  has-been-repeated bit only on path addresses. Frames from conforming senders
+  (Dire Wolf, aprx, graywolf) set the command bit on the destination, which was
+  rendered as a bogus "DST*" in the TNC2 line and transmitted; the destination star
+  is gone from RF and APRS-IS output. Encoding now always emits the UI command pair
+  (dst C=1, src C=0) instead of mapping the dst/src repeated flags onto the wire.
 - Fix: a rejected KISS/TCP peer no longer blocks the bridge; the listen socket is non-blocking and rejected peers return to the main loop
 - Fix: framed DATA decoder state is owned by the data socket; KISS client connect/disconnect no longer desyncs the daemon stream, and daemon RX is decoded (and counted as drops) while no client is connected
 - Fix: framed decode errors reconnect the data socket to resync the stream

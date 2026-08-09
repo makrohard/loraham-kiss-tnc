@@ -51,6 +51,10 @@ static int tnc2_parse_path(char *addr_part, ax25_frame_t *frame)
         return ret;
     }
 
+    /* '*' is a path-only marker. Tolerate it on the destination (frames from
+     * other senders carry it) but drop it, so it is never re-emitted. */
+    frame->dst.repeated = 0;
+
     if (!comma) {
         return LHKT_OK;
     }
@@ -140,6 +144,8 @@ int tnc2_parse_line(const char *line, ax25_frame_t *frame)
         return ret;
     }
 
+    frame->src.repeated = 0;
+
     ret = tnc2_parse_path(gt + 1, frame);
     if (ret != LHKT_OK) {
         return ret;
@@ -152,6 +158,32 @@ int tnc2_parse_line(const char *line, ax25_frame_t *frame)
     frame->payload_len = payload_len;
 
     return LHKT_OK;
+}
+
+/*
+ * Format a dst/src address with the '*' suppressed.
+ *
+ * '*' renders the AX.25 has-been-repeated bit, which exists only on path
+ * addresses; on dst/src that bit position is the command/response bit. The rule
+ * lives here — in the renderer — so it holds for EVERY frame, not only for the
+ * ones that came through tnc2_parse_line (which also clears the flag) or through
+ * ax25_encode_ui (which ignores it). A frame built by hand, from a beacon or from
+ * a config-supplied callsign must not be able to put "DST*" on the air.
+ */
+static int tnc2_format_station(const ax25_addr_t *addr,
+                               char *out,
+                               size_t out_size)
+{
+    ax25_addr_t plain;
+
+    if (!addr) {
+        return LHKT_ERR_FORMAT;
+    }
+
+    plain = *addr;
+    plain.repeated = 0;
+
+    return ax25_addr_format(&plain, out, out_size);
 }
 
 static int tnc2_append_mem(char *out,
@@ -219,7 +251,7 @@ int tnc2_format_line(const ax25_frame_t *frame,
         }
     }
 
-    ret = ax25_addr_format(&frame->src, addr, sizeof(addr));
+    ret = tnc2_format_station(&frame->src, addr, sizeof(addr));
     if (ret != LHKT_OK) {
         return ret;
     }
@@ -234,7 +266,7 @@ int tnc2_format_line(const ax25_frame_t *frame,
         return ret;
     }
 
-    ret = ax25_addr_format(&frame->dst, addr, sizeof(addr));
+    ret = tnc2_format_station(&frame->dst, addr, sizeof(addr));
     if (ret != LHKT_OK) {
         return ret;
     }

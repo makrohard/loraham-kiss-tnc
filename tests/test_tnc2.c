@@ -112,6 +112,73 @@ static void test_format_roundtrip(void)
     assert(memcmp(out.payload, payload, out.payload_len) == 0);
 }
 
+/*
+ * A frame from graywolf v0.14.12 (captured over KISS/TCP) carries the AX.25
+ * command C bit on the destination. That bit is not a repeated marker, so the
+ * rendered line must read "APGRWO", never "APGRWO*", or the '*' would travel
+ * on to RF and APRS-IS.
+ */
+static void test_format_command_frame_has_no_dst_star(void)
+{
+    static const uint8_t raw[] = {
+        0x82, 0xa0, 0x8e, 0xa4, 0xae, 0x9e, 0xe0,       /* APGRWO,  C=1 */
+        0x88, 0x98, 0x62, 0xa8, 0xa6, 0xa8, 0x74,       /* DL1TST-10, C=0 */
+        0xae, 0x92, 0x88, 0x8a, 0x62, 0x40, 0x63,       /* WIDE1-1, H=0, last */
+        0x03, 0xf0,
+        '!', '4', '8', '2', '7', '.', '7', '0', 'N'
+    };
+    ax25_frame_t frame;
+    char line[LHKT_TNC2_MAX_LINE];
+    size_t line_len = 0;
+
+    assert(ax25_decode_ui(raw, sizeof(raw), &frame) == LHKT_OK);
+    assert(tnc2_format_line(&frame, line, sizeof(line), &line_len) == LHKT_OK);
+    assert(strcmp(line, "DL1TST-10>APGRWO,WIDE1-1:!4827.70N") == 0);
+    assert(line_len == strlen(line));
+}
+
+/* A '*' on the destination of an inbound line is tolerated but dropped. */
+static void test_parse_drops_dst_star(void)
+{
+    ax25_frame_t frame;
+    char line[LHKT_TNC2_MAX_LINE];
+    size_t line_len = 0;
+
+    assert(tnc2_parse_line("DL1ABC>APRS*,WIDE1-1:!test", &frame) == LHKT_OK);
+    assert(frame.dst.repeated == 0);
+    assert(frame.src.repeated == 0);
+    assert(frame.path_len == 1);
+
+    assert(tnc2_format_line(&frame, line, sizeof(line), &line_len) == LHKT_OK);
+    assert(strcmp(line, "DL1ABC>APRS,WIDE1-1:!test") == 0);
+}
+
+/*
+ * The renderer itself must never star a dst/src, even for a frame assembled by
+ * hand rather than parsed — that is what keeps a beacon or a config-supplied
+ * callsign from putting "DST*" on the air. Path stars still render.
+ */
+static void test_format_never_stars_a_station(void)
+{
+    ax25_frame_t frame;
+    char line[LHKT_TNC2_MAX_LINE];
+    size_t line_len = 0;
+
+    ax25_frame_init(&frame);
+
+    assert(ax25_addr_parse("APRS*", &frame.dst) == LHKT_OK);
+    assert(ax25_addr_parse("DL1ABC-9*", &frame.src) == LHKT_OK);
+    assert(ax25_addr_parse("WIDE1-1*", &frame.path[0]) == LHKT_OK);
+    frame.path_len = 1;
+    frame.payload[0] = 'x';
+    frame.payload_len = 1;
+
+    assert(frame.dst.repeated == 1 && frame.src.repeated == 1);
+
+    assert(tnc2_format_line(&frame, line, sizeof(line), &line_len) == LHKT_OK);
+    assert(strcmp(line, "DL1ABC-9>APRS,WIDE1-1*:x") == 0);
+}
+
 static void test_reject_oversized_format_path(void)
 {
     ax25_frame_t frame;
@@ -204,6 +271,9 @@ int main(void)
     test_parse_message_payload_unchanged();
     test_repeated_digipeater_roundtrip();
     test_format_roundtrip();
+    test_format_command_frame_has_no_dst_star();
+    test_parse_drops_dst_star();
+    test_format_never_stars_a_station();
     test_reject_oversized_format_path();
     test_reject_nul_payload();
     test_reject_oversized_format_payload();
