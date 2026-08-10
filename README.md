@@ -16,6 +16,33 @@ APRS client <-> KISS/TCP <-> loraham_kiss_tnc <-> framed DATA socket <-> loraham
 - `TX_PACKET` payloads are still sent as RF bytes without metadata
 - KISS remains fire-and-forget; TX result frames are never forwarded
 
+## LoRa-APRS / CA2RXU compatibility
+
+The on-air frame is the LoRa-APRS one: the three bytes `0x3C 0xFF 0x01` followed by plain
+TNC2 text, with no terminator. That is byte-for-byte what
+[CA2RXU's LoRa_APRS_iGate](https://github.com/richonguzman/LoRa_APRS_iGate) transmits
+(`radio.transmit("\x3c\xff\x01" + packet)`) and exactly what it requires on receive
+(`packet.substring(0,3) == "\x3c\xff\x01"`, then `sender = packet.substring(3, indexOf(">"))`).
+`tests/test_loraham_sock.c` pins those bytes so a regression cannot ship green.
+
+AX.25 addresses are narrower than LoRa's free-form TNC2 text, so a line that cannot be
+represented as AX.25 is **dropped with a typed error, never altered onto the air**:
+
+| Line | Result |
+|---|---|
+| `DJ0CHE-10>APLG01,DB0ABC-10*,WIDE1-1:…` | passes through unchanged, `*` preserved |
+| callsign longer than 6 characters | dropped (`LHKT_ERR_FORMAT`) |
+| SSID outside 0–15 | dropped (`LHKT_ERR_FORMAT`) |
+| non-alphanumeric callsign (`DJ0CHE/P`) | dropped (`LHKT_ERR_FORMAT`) |
+| more than 8 digipeaters | dropped (`LHKT_ERR_LONG`) |
+| lowercase callsign | uppercased, as any AX.25 TNC does |
+
+Bit 7 of an address SSID byte is position-dependent and handled as such: the command/response
+bit on the destination and source, the has-been-repeated bit (`*`) only on path entries. A
+conforming sender (CA2RXU, Dire Wolf, aprx, graywolf) sets the command bit on the destination,
+and rendering that as `DST*` would have put a malformed destination on the air and into
+APRS-IS.
+
 ## Limitations
 - single KISS/TCP client
 - KISS port 0 only

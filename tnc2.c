@@ -245,6 +245,7 @@ int tnc2_format_line(const ax25_frame_t *frame,
         return LHKT_ERR_LONG;
     }
 
+    /* NUL cannot travel in a C string, and a payload carrying one is malformed. */
     for (i = 0; i < frame->payload_len; i++) {
         if (frame->payload[i] == 0) {
             return LHKT_ERR_FORMAT;
@@ -299,10 +300,27 @@ int tnc2_format_line(const ax25_frame_t *frame,
     }
 
     if (frame->payload_len > 0) {
+        /*
+         * A TNC2 line is exactly that — one line, so CR and LF become spaces.
+         *
+         * Left in place they would SPLIT the frame: LoRa-APRS receivers that terminate on a
+         * newline lose the tail, this bridge's own RX scanner ends the packet there, and an
+         * iGate would inject the remainder into APRS-IS as its own record. Substituting keeps
+         * the operator's text — a multi-line status or message still arrives, on one line —
+         * which is friendlier than dropping the packet for a stray line break.
+         */
+        uint8_t oneline[LHKT_AX25_MAX_PAYLOAD];
+
+        for (i = 0; i < frame->payload_len; i++) {
+            uint8_t b = frame->payload[i];
+
+            oneline[i] = (b == '\n' || b == '\r') ? (uint8_t)' ' : b;
+        }
+
         ret = tnc2_append_mem(out,
                               out_size,
                               &pos,
-                              frame->payload,
+                              oneline,
                               frame->payload_len);
         if (ret != LHKT_OK) {
             return ret;

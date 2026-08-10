@@ -60,6 +60,8 @@ size_t lhkt_test_bridge_config_call_count(void);
 double lhkt_test_bridge_config_freq_at(size_t index);
 void lhkt_test_bridge_set_write_result(ssize_t result);
 size_t lhkt_test_bridge_write_call_count(void);
+/* The exact bytes last handed to the daemon for RF (the on-air frame). */
+const uint8_t *lhkt_test_bridge_last_tx(size_t *len);
 
 int lhkt_test_bridge_send_initial_config(const lhkt_config_t *cfg);
 int lhkt_test_bridge_wait_tx_complete_events(const char *events);

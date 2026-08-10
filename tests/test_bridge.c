@@ -955,6 +955,73 @@ static void test_framed_error_is_counted(void)
     assert(stats.kiss_tx == 0);
 }
 
+/*
+ * CA2RXU WIRE CONTRACT, end to end: a KISS frame in, the exact on-air bytes out.
+ *
+ * richonguzman/LoRa_APRS_iGate (src/lora_utils.cpp) transmits
+ *     radio.transmit("\x3c\xff\x01" + packet)
+ * and on receive REFUSES anything else:
+ *     if (packet.substring(0,3) == "\x3c\xff\x01" && ...)
+ *     sender = packet.substring(3, packet.indexOf(">"));
+ *
+ * This asserts the bytes the bridge actually hands the daemon for RF — produced by the real
+ * KISS -> AX.25 -> TNC2 -> LoRa-APRS path, not by restating a literal. The input is the frame
+ * a conforming APRS client sends (dst command bit set, 0xe0), which is what used to render a
+ * bogus "APGRWO*" onto the air.
+ */
+static void test_ca2rxu_on_air_frame_end_to_end(void)
+{
+    static const uint8_t ax25[] = {
+        0x82, 0xa0, 0x8e, 0xa4, 0xae, 0x9e, 0xe0,       /* APGRWO,    C=1 */
+        0x88, 0x98, 0x62, 0xa8, 0xa6, 0xa8, 0x74,       /* DL1TST-10, C=0 */
+        0xae, 0x92, 0x88, 0x8a, 0x62, 0x40, 0x63,       /* WIDE1-1, H=0, last */
+        0x03, 0xf0,
+        '!', '4', '8', '2', '7', '.', '7', '0', 'N'
+    };
+    static const char expected[] = "DL1TST-10>APGRWO,WIDE1-1:!4827.70N";
+    lhkt_config_t cfg;
+    lhkt_stats_t stats;
+    kiss_params_t params;
+    kiss_frame_t frame;
+    const uint8_t *air;
+    size_t air_len = 0;
+    int config_results[] = { LHKT_OK, LHKT_OK };   /* freq -> TX, then back to RX */
+
+    lhkt_config_defaults(&cfg);
+    lhkt_stats_init(&stats);
+    kiss_params_init(&params);
+    lhkt_test_bridge_reset_tx_hooks();
+    lhkt_test_bridge_set_config_results(config_results,
+                                        sizeof(config_results) / sizeof(config_results[0]));
+    lhkt_test_bridge_set_write_result(1);          /* stub the socket; capture still records */
+    memset(&frame, 0, sizeof(frame));
+
+    frame.port = 0;
+    frame.command = KISS_CMD_DATA;
+    memcpy(frame.data, ax25, sizeof(ax25));
+    frame.data_len = sizeof(ax25);
+
+    assert(lhkt_test_handle_kiss_frame(&frame, &params, &cfg, &stats, 42) == LHKT_OK);
+    assert(stats.loraham_tx == 1);
+
+    air = lhkt_test_bridge_last_tx(&air_len);
+
+    /* the three bytes CA2RXU compares against, then plain TNC2, no terminator at all */
+    assert(air_len == 3 + strlen(expected));
+    assert(air[0] == 0x3c && air[1] == 0xff && air[2] == 0x01);
+    assert(memcmp(air + 3, expected, strlen(expected)) == 0);
+    assert(memchr(air, '\n', air_len) == NULL);
+    assert(memchr(air, '\r', air_len) == NULL);
+
+    /* CA2RXU takes the sender as substring(3, indexOf(">")): no '*' may appear before '>' */
+    {
+        const uint8_t *body = air + 3;
+        const uint8_t *gt = memchr(body, '>', air_len - 3);
+        assert(gt != NULL);
+        assert(memchr(body, '*', (size_t)(gt - body)) == NULL);
+    }
+}
+
 static void test_nonzero_kiss_port_is_dropped(void)
 {
     lhkt_config_t cfg;
@@ -1306,6 +1373,7 @@ int main(void)
     test_framed_rx_short_metadata_is_dropped();
     test_framed_rx_survives_no_client();
     test_framed_error_is_counted();
+    test_ca2rxu_on_air_frame_end_to_end();
     test_nonzero_kiss_port_is_dropped();
     test_invalid_tnc2_is_dropped();
     test_client_write_failure_returns_socket_error();

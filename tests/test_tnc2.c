@@ -179,6 +179,30 @@ static void test_format_never_stars_a_station(void)
     assert(strcmp(line, "DL1ABC-9>APRS,WIDE1-1*:x") == 0);
 }
 
+/*
+ * A TNC2 line is one line, so CR/LF inside the payload become spaces rather than splitting the
+ * frame (or costing the operator the whole packet). Left in place they would truncate at every
+ * receiver that terminates on a newline and inject the tail into APRS-IS as its own record.
+ */
+static void test_crlf_payload_becomes_spaces(void)
+{
+    ax25_frame_t frame;
+    char line[LHKT_TNC2_MAX_LINE];
+    size_t line_len = 0;
+    const char *payload = ">line one\r\nline two";
+
+    ax25_frame_init(&frame);
+    assert(ax25_addr_parse("APRS", &frame.dst) == LHKT_OK);
+    assert(ax25_addr_parse("DJ0CHE-10", &frame.src) == LHKT_OK);
+    memcpy(frame.payload, payload, strlen(payload));
+    frame.payload_len = strlen(payload);
+
+    assert(tnc2_format_line(&frame, line, sizeof(line), &line_len) == LHKT_OK);
+    assert(strcmp(line, "DJ0CHE-10>APRS:>line one  line two") == 0);
+    assert(line_len == strlen(line));
+    assert(strchr(line, '\n') == NULL && strchr(line, '\r') == NULL);
+}
+
 static void test_reject_oversized_format_path(void)
 {
     ax25_frame_t frame;
@@ -274,6 +298,7 @@ int main(void)
     test_format_command_frame_has_no_dst_star();
     test_parse_drops_dst_star();
     test_format_never_stars_a_station();
+    test_crlf_payload_becomes_spaces();
     test_reject_oversized_format_path();
     test_reject_nul_payload();
     test_reject_oversized_format_payload();

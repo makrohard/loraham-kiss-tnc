@@ -83,6 +83,9 @@ static void test_build_packet(void)
     assert(out[1] == LORAHAM_APRS_HDR1);
     assert(out[2] == LORAHAM_APRS_HDR2);
     assert(memcmp(out + LHKT_LORAHAM_HDR_LEN, tnc2, strlen(tnc2)) == 0);
+    /* The three bytes CA2RXU compares against, as LITERALS — asserting them through the
+     * LORAHAM_APRS_HDR* constants would pass even if those constants changed. */
+    assert(out[0] == 0x3c && out[1] == 0xff && out[2] == 0x01);
 }
 
 static void test_build_packet_limit(void)
@@ -452,52 +455,11 @@ static void test_txresult_enable_socketpair(void)
     close(sv[1]);
 }
 
-/*
- * CA2RXU WIRE CONTRACT (richonguzman/LoRa_APRS_iGate, src/lora_utils.cpp).
- *
- * That firmware — the de-facto LoRa-APRS iGate/digi on 433 — transmits
- *     radio.transmit("\x3c\xff\x01" + packet)
- * and on receive REFUSES anything else:
- *     if (packet.substring(0,3) == "\x3c\xff\x01" && ...)
- *     sender = packet.substring(3, packet.indexOf(">"));
- *
- * So the three header bytes are exact, there is NO trailing newline, and everything after
- * byte 3 is plain TNC2. This test pins those bytes for the frame an APRS client (graywolf,
- * Dire Wolf, aprx) hands us, so a change here cannot silently make us invisible to every
- * CA2RXU station on the band.
- */
-static void test_ca2rxu_on_air_bytes(void)
-{
-    const char *tnc2 = "DJ0CHE-10>APGRWO,WIDE1-1:!4824.07N/00959.26E-x";
-    uint8_t out[LHKT_LORAHAM_TX_MAX];
-    size_t out_len = 0;
-
-    assert(loraham_build_aprs_packet(tnc2, out, sizeof(out), &out_len) == LHKT_OK);
-
-    /* the exact three bytes CA2RXU compares against */
-    assert(out[0] == 0x3c && out[1] == 0xff && out[2] == 0x01);
-
-    /* substring(3) is the TNC2 line, byte for byte, with no terminator of any kind */
-    assert(out_len == 3 + strlen(tnc2));
-    assert(memcmp(out + 3, tnc2, strlen(tnc2)) == 0);
-
-    /* CA2RXU derives the sender as substring(3, indexOf(">")) — that must be our source
-     * callsign, which is only true while no '*' is rendered on a station address. */
-    const char *body = (const char *)out + 3;
-    const char *gt = strchr(body, '>');
-    assert(gt != NULL);
-    assert((size_t)(gt - body) == strlen("DJ0CHE-10"));
-    assert(strncmp(body, "DJ0CHE-10", strlen("DJ0CHE-10")) == 0);
-    assert(memchr(out, '\n', out_len) == NULL);
-    assert(memchr(out, '\r', out_len) == NULL);
-}
-
 int main(void)
 {
     test_sock_write_socketpair();
     test_sock_write_rejects_invalid_args();
     test_build_packet();
-    test_ca2rxu_on_air_bytes();
     test_extract_split_then_idle_flush();
     test_build_packet_limit();
     test_extract_with_newline();

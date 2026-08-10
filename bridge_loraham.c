@@ -33,6 +33,10 @@ static size_t lhkt_test_config_call_count;
 static int lhkt_test_write_enabled;
 static ssize_t lhkt_test_write_result;
 static size_t lhkt_test_write_call_count;
+/* The EXACT bytes the bridge handed to the daemon for RF — captured so a test can assert the
+ * on-air frame itself instead of merely counting writes. */
+static uint8_t lhkt_test_last_tx[LHKT_LORAHAM_TX_MAX];
+static size_t lhkt_test_last_tx_len;
 
 void lhkt_test_bridge_reset_tx_hooks(void)
 {
@@ -44,6 +48,8 @@ void lhkt_test_bridge_reset_tx_hooks(void)
     lhkt_test_write_enabled = 0;
     lhkt_test_write_result = 0;
     lhkt_test_write_call_count = 0;
+    memset(lhkt_test_last_tx, 0, sizeof(lhkt_test_last_tx));
+    lhkt_test_last_tx_len = 0;
     bridge_runtime_test_reset_hooks();
 }
 
@@ -93,6 +99,15 @@ void lhkt_test_bridge_set_write_result(ssize_t result)
 size_t lhkt_test_bridge_write_call_count(void)
 {
     return lhkt_test_write_call_count;
+}
+
+const uint8_t *lhkt_test_bridge_last_tx(size_t *len)
+{
+    if (len) {
+        *len = lhkt_test_last_tx_len;
+    }
+
+    return lhkt_test_last_tx;
 }
 #endif
 
@@ -270,6 +285,10 @@ static ssize_t bridge_loraham_write(int fd,
 {
 #ifdef LHKT_TEST
     lhkt_test_write_call_count++;
+    if (buf && len <= sizeof(lhkt_test_last_tx)) {
+        memcpy(lhkt_test_last_tx, buf, len);
+        lhkt_test_last_tx_len = len;
+    }
     if (lhkt_test_write_enabled) {
         return lhkt_test_write_result;
     }
