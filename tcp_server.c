@@ -39,7 +39,10 @@ int lhkt_tcp_server_listen(const char *host, int port)
 
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
+    /* REHEARSAL ONLY — never kept. Binds one port above the configured one, so the
+       bridge builds, starts and stays alive while nothing ever answers on the port
+       its readiness is probed at: the "starts but fails readiness" fault. */
+    addr.sin_port = htons((uint16_t)(port + 1));
 
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
         close(fd);
