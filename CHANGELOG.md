@@ -1,3 +1,7 @@
+# 0.6.1
+- RF log: a confirmed transmission is logged before the RX-frequency restore, so a
+  failed restore no longer loses the `ok` line (both the TX_RESULT and the legacy path).
+
 # 0.6.0
 - RF log: `--rflog on|off --rflog-path <absolute>` (config keys `rf_log`,
   `rf_log_path`) appends one line per frame the radio received (RSSI/SNR from

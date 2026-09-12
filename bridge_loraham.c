@@ -770,6 +770,12 @@ static int bridge_loraham_send_packet_with_client(
             return LHKT_ERR_TX_RESULT;
         }
 
+        /* The outcome is known now: log it BEFORE restoring RX, whose failure returns
+         * early below and must not lose a confirmed transmission from the RF log. */
+        if (tx_result.status == LORAHAM_TX_STATUS_OK) {
+            lhkt_rflog_tx("ok", packet, packet_len);
+        }
+
         ret = bridge_loraham_restore_rx_freq(cfg, stats, conf_fd);
         if (ret != LHKT_OK) {
             return ret;
@@ -790,7 +796,6 @@ static int bridge_loraham_send_packet_with_client(
             stats->loraham_tx++;
         }
 
-        lhkt_rflog_tx("ok", packet, packet_len);
         return client_error;
     }
 
@@ -810,6 +815,9 @@ static int bridge_loraham_send_packet_with_client(
         (void)bridge_runtime_sleep_ms(cfg->tx_return_ms);
     }
 
+    /* Logged before the RX restore for the same reason as above. */
+    lhkt_rflog_tx(confirm_ret == LHKT_OK ? "ok" : "unconfirmed", packet, packet_len);
+
     ret = bridge_loraham_restore_rx_freq(cfg, stats, conf_fd);
     if (ret != LHKT_OK) {
         return ret;
@@ -819,7 +827,6 @@ static int bridge_loraham_send_packet_with_client(
         stats->loraham_tx++;
     }
 
-    lhkt_rflog_tx(confirm_ret == LHKT_OK ? "ok" : "unconfirmed", packet, packet_len);
     return LHKT_OK;
 }
 

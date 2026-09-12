@@ -1,3 +1,6 @@
+#define _DEFAULT_SOURCE
+#include <stdlib.h>
+#include "../rflog.h"
 #include "ax25.h"
 #include "bridge_conf.h"
 #include "bridge_kiss.h"
@@ -666,6 +669,40 @@ static void test_tx_queue_pops_written_packet_on_restore_failure(void)
     assert(queue_depth == 0);
     assert(write_calls == 1);
     assert(restore_failures == 2);
+}
+
+static void test_restore_failure_keeps_the_tx_record(void)
+{
+    /* The transmission happened (the frame was written and the confirmation phase ran);
+     * a failed RX-frequency restore afterwards must not lose its RF-log line. */
+    char dir[] = "/tmp/lhkt-bridge-rflog-XXXXXX";
+    char path[128];
+    size_t queue_depth = 99;
+    size_t write_calls = 99;
+    uint64_t restore_failures = 0;
+    FILE *f;
+    long lines = 0;
+    int c;
+
+    assert(mkdtemp(dir) != NULL);
+    snprintf(path, sizeof(path), "%s/rf-kiss.log", dir);
+    assert(lhkt_rflog_open(path) == LHKT_OK);
+    assert(lhkt_test_bridge_drain_pops_written_restore_failure(&queue_depth,
+                                                              &restore_failures,
+                                                              &write_calls) == LHKT_ERR);
+    assert(restore_failures == 2);
+    lhkt_rflog_close();
+    f = fopen(path, "r");
+    assert(f != NULL);
+    while ((c = fgetc(f)) != EOF) {
+        if (c == '\n') {
+            lines++;
+        }
+    }
+    fclose(f);
+    assert(lines == 1);                      /* one TX record, despite the failed restore */
+    unlink(path);
+    rmdir(dir);
 }
 
 static void test_tx_requires_persistent_conf_socket(void)
@@ -1363,6 +1400,7 @@ int main(void)
     test_tx_queue_waits_for_status();
     test_tx_queue_drain_reads_pending_conf();
     test_tx_queue_pops_written_packet_on_restore_failure();
+    test_restore_failure_keeps_the_tx_record();
     test_tx_requires_persistent_conf_socket();
     test_tx_confirmation_missing_is_counted();
     test_fd_set_rejects_too_large_fd();
