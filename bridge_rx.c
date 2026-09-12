@@ -1,4 +1,5 @@
 #include "bridge_rx.h"
+#include "rflog.h"
 
 #include "ax25.h"
 #include "kiss.h"
@@ -304,6 +305,17 @@ int bridge_rx_handle_framed_frame(int client_fd,
     }
 
     if (frame->type == LORAHAM_FRAME_RX_PACKET) {
+        /* The RF log records what the radio delivered — before the KISS-client
+         * gate below, which decides only who consumes it. The framed header
+         * carries [rssi_cdbm i16 LE][snr_cdb i16 LE] ahead of the RF bytes. */
+        if (frame->payload_len >= BRIDGE_RX_LORAHAM_META_LEN) {
+            int16_t rssi = (int16_t)(frame->payload[0] | (frame->payload[1] << 8));
+            int16_t snr = (int16_t)(frame->payload[2] | (frame->payload[3] << 8));
+            lhkt_rflog_rx(rssi, snr,
+                          frame->payload + BRIDGE_RX_LORAHAM_META_LEN,
+                          frame->payload_len - BRIDGE_RX_LORAHAM_META_LEN);
+        }
+
         if (client_fd < 0) {
             /* Frame was decoded to keep the daemon stream in sync, but there is
              * no KISS client to deliver it to: drop it (counted). */

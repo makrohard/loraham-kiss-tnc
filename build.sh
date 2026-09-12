@@ -70,6 +70,7 @@ sources=(
   loraham_sock.c
   loraham_kiss_tnc.c
   config.c
+  rflog.c
 )
 
 source_paths=()

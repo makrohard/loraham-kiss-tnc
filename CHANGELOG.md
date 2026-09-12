@@ -1,3 +1,12 @@
+# 0.6.0
+- RF log: `--rflog on|off --rflog-path <absolute>` (config keys `rf_log`,
+  `rf_log_path`) appends one line per frame the radio received (RSSI/SNR from
+  the framed header, before the KISS-client gate) or sent — `ok` after the
+  daemon's `TX_RESULT`/confirmation, `unconfirmed` after a complete write whose
+  confirmation was lost; nothing for a suppressed, dropped or refused send. The
+  TNC2 text is recovered from the packet itself. Copy-truncate at 5 MB to
+  `<path>.1`, same inode. `on` without a path refuses to start.
+
 # 0.5.0
 - Add `--bind` source-IP allow-list (IPv4/CIDR, default 127.0.0.1). Only matching
   peers may connect; the listen address is derived from it; rejected peers are

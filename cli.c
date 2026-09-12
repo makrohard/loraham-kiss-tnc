@@ -34,6 +34,8 @@ void lhkt_cli_print_usage(const char *prog)
     printf("      --rx-freq MHz        RX frequency\n");
     printf("      --tx-freq MHz        TX frequency\n");
     printf("      --rx-only            Disable TX\n");
+    printf("      --rflog on|off       RF log: one line per frame received or sent\n");
+    printf("      --rflog-path PATH    Absolute path of the RF log (required with on)\n");
     printf("      --tx-settle-ms MS    Wait after TX freq switch\n");
     printf("      --tx-return-ms MS    Fallback wait after TX\n");
     printf("      --tx-busy-timeout-ms MS\n");
@@ -160,6 +162,8 @@ static int parse_cli_args(int argc, char **argv, lhkt_config_t *cfg)
         OPT_RX_FREQ,
         OPT_TX_FREQ,
         OPT_RX_ONLY,
+        OPT_RF_LOG,
+        OPT_RF_LOG_PATH,
         OPT_TX_SETTLE_MS,
         OPT_TX_RETURN_MS,
         OPT_TX_BUSY_TIMEOUT_MS,
@@ -178,6 +182,8 @@ static int parse_cli_args(int argc, char **argv, lhkt_config_t *cfg)
         { "rx-freq",     required_argument, 0, OPT_RX_FREQ },
         { "tx-freq",     required_argument, 0, OPT_TX_FREQ },
         { "rx-only",      no_argument,       0, OPT_RX_ONLY },
+        { "rflog",        required_argument, 0, OPT_RF_LOG },
+        { "rflog-path",   required_argument, 0, OPT_RF_LOG_PATH },
         { "tx-settle-ms", required_argument, 0, OPT_TX_SETTLE_MS },
         { "tx-return-ms", required_argument, 0, OPT_TX_RETURN_MS },
         { "tx-busy-timeout-ms", required_argument, 0, OPT_TX_BUSY_TIMEOUT_MS },
@@ -275,6 +281,26 @@ static int parse_cli_args(int argc, char **argv, lhkt_config_t *cfg)
             cfg->rx_only = 1;
             break;
 
+        case OPT_RF_LOG:
+            if (strcmp(optarg, "on") == 0) {
+                cfg->rf_log = 1;
+            } else if (strcmp(optarg, "off") == 0) {
+                cfg->rf_log = 0;
+            } else {
+                fprintf(stderr, "[CFG] invalid --rflog '%s' (on|off)\n", optarg);
+                return LHKT_ERR_FORMAT;
+            }
+            break;
+
+        case OPT_RF_LOG_PATH:
+            if (optarg[0] != '/' || strlen(optarg) >= sizeof(cfg->rf_log_path)) {
+                fprintf(stderr, "[CFG] invalid --rflog-path '%s' (absolute, < %zu chars)\n",
+                        optarg, sizeof(cfg->rf_log_path));
+                return LHKT_ERR_FORMAT;
+            }
+            strcpy(cfg->rf_log_path, optarg);
+            break;
+
         case OPT_TX_SETTLE_MS:
             ret = parse_int_arg(optarg, 0, 60000, &cfg->tx_settle_ms);
             if (ret != LHKT_OK) {
@@ -363,6 +389,7 @@ void lhkt_cli_print_config(const lhkt_config_t *cfg)
     printf("[CFG] data_socket=%s\n", cfg->data_socket);
     printf("[CFG] conf_socket=%s\n", cfg->conf_socket);
     printf("[CFG] rx_only=%d\n", cfg->rx_only);
+    printf("[CFG] rf_log=%d path=%s\n", cfg->rf_log, cfg->rf_log_path[0] ? cfg->rf_log_path : "-");
     printf("[CFG] verbose=%d\n", cfg->verbose);
     printf("[CFG] stats_interval=%d\n", cfg->stats_interval);
     printf("[CFG] tx_settle_ms=%d\n", cfg->tx_settle_ms);

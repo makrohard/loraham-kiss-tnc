@@ -106,6 +106,8 @@ Options:
       --rx-freq MHz        RX frequency
       --tx-freq MHz        TX frequency
       --rx-only            Disable TX
+      --rflog on|off       RF log: one line per frame received or sent
+      --rflog-path PATH    Absolute path of the RF log (required with on)
       --tx-settle-ms MS    Wait after TX freq switch
       --tx-return-ms MS    Fallback wait after TX
       --tx-busy-timeout-ms MS

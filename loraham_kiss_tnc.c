@@ -37,6 +37,8 @@ void lhkt_config_defaults(lhkt_config_t *cfg)
 
     cfg->rx_only = 0;
     cfg->verbose = 0;
+    cfg->rf_log = 0;
+    cfg->rf_log_path[0] = '\0';
     cfg->stats_interval = 900;
     cfg->tx_settle_ms = 100;
     cfg->tx_return_ms = 1000;

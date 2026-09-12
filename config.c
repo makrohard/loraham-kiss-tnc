@@ -251,6 +251,18 @@ int lhkt_config_parse_line(lhkt_config_t *cfg, char *line, unsigned int line_no)
         return ret;
     }
 
+    if (strcmp(key, "rf_log") == 0) {
+        ret = parse_bool_value(value, &bval);
+        if (ret == LHKT_OK) {
+            cfg->rf_log = bval;
+        }
+        return ret;
+    }
+
+    if (strcmp(key, "rf_log_path") == 0) {
+        return copy_string(cfg->rf_log_path, sizeof(cfg->rf_log_path), value);
+    }
+
     if (strcmp(key, "rx_only") == 0) {
         ret = parse_bool_value(value, &bval);
         if (ret == LHKT_OK) {

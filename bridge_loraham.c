@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "bridge_loraham.h"
+#include "rflog.h"
 
 #include "bridge_kiss.h"
 #include "bridge_rx.h"
@@ -742,6 +743,7 @@ static int bridge_loraham_send_packet_with_client(
                 stats->tx_unconfirmed++;
             }
 
+            lhkt_rflog_tx("unconfirmed", packet, packet_len);   /* written, never confirmed */
             return LHKT_ERR_TX_RESULT;
         }
 
@@ -760,6 +762,7 @@ static int bridge_loraham_send_packet_with_client(
 
             /* Auftrag kann noch laufen. */
             printf("[LoRaHAM] TX_RESULT missing or invalid\n");
+            lhkt_rflog_tx("unconfirmed", packet, packet_len);
             /* Still restore RX so a confirmation timeout does not leave the
              * radio parked on the TX frequency (its own failure is counted
              * inside; the returned error is unchanged). */
@@ -787,6 +790,7 @@ static int bridge_loraham_send_packet_with_client(
             stats->loraham_tx++;
         }
 
+        lhkt_rflog_tx("ok", packet, packet_len);
         return client_error;
     }
 
@@ -815,6 +819,7 @@ static int bridge_loraham_send_packet_with_client(
         stats->loraham_tx++;
     }
 
+    lhkt_rflog_tx(confirm_ret == LHKT_OK ? "ok" : "unconfirmed", packet, packet_len);
     return LHKT_OK;
 }
 

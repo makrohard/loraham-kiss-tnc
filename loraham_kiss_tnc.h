@@ -56,6 +56,10 @@ typedef struct {
 
     int rx_only;
     int verbose;
+
+    /* RF log (--rflog on|off, --rflog-path): the controller names the file. */
+    int  rf_log;
+    char rf_log_path[LHKT_PATH_MAX];
     int stats_interval;
     int tx_settle_ms;
     int tx_return_ms;

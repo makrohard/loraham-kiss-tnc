@@ -114,6 +114,10 @@ run_test() {
   ok_count=$((ok_count + 1))
 }
 
+run_test rflog \
+  "$script_dir/rflog.c" \
+  "$tests_dir/test_rflog.c"
+
 run_test config \
   "$script_dir/loraham_kiss_tnc.c" \
   "$script_dir/config.c" \
@@ -167,6 +171,7 @@ run_test bridge \
   "$script_dir/ax25.c" \
   "$script_dir/tnc2.c" \
   "$script_dir/kiss.c" \
+  "$script_dir/rflog.c" \
   "$tests_dir/test_bridge.c"
 CFLAGS="$old_cflags"
 
