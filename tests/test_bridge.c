@@ -38,9 +38,11 @@ void lhkt_test_bridge_reset_tx_hooks(void);
 void lhkt_test_bridge_set_config_results(const int *results, size_t count);
 size_t lhkt_test_bridge_config_call_count(void);
 double lhkt_test_bridge_config_freq_at(size_t index);
+int lhkt_test_bridge_restore_rx_freq(const lhkt_config_t *cfg);
 void lhkt_test_bridge_set_write_result(ssize_t result);
 size_t lhkt_test_bridge_write_call_count(void);
 size_t lhkt_test_bridge_sleep_call_count(void);
+void bridge_runtime_test_reset_hooks(void);
 int lhkt_test_bridge_should_reconnect_data_socket(int ret);
 int lhkt_test_bridge_should_disconnect_kiss_client(int ret);
 int lhkt_test_bridge_should_reconnect_conf_socket(int ret);
@@ -1187,6 +1189,132 @@ static void test_tx_write_failure_restores_rx(void)
 }
 
 
+static void test_restore_fails_toward_shifting_when_tx_freq_is_unknown(void)
+{
+    /* The predicate answers NO only when both frequencies are known AND equal. An unknown tx_freq
+     * is ABSENCE of information, not evidence that no shift happened — skipping the restore on it
+     * would leave the radio parked on the TX frequency, which is the dangerous direction. */
+    lhkt_config_t cfg;
+    int config_results[] = { LHKT_OK, LHKT_OK };
+
+    lhkt_config_defaults(&cfg);
+    cfg.tx_freq = cfg.rx_freq;                 /* known and equal -> nothing to restore */
+    lhkt_test_bridge_reset_tx_hooks();
+    lhkt_test_bridge_set_config_results(config_results,
+                                        sizeof(config_results) / sizeof(config_results[0]));
+    assert(lhkt_test_bridge_restore_rx_freq(&cfg) == LHKT_OK);
+    assert(lhkt_test_bridge_config_call_count() == 0);
+
+    lhkt_config_defaults(&cfg);
+    cfg.tx_freq = cfg.rx_freq;
+    cfg.have_tx_freq = 0;                      /* UNKNOWN -> restore anyway */
+    lhkt_test_bridge_reset_tx_hooks();
+    lhkt_test_bridge_set_config_results(config_results,
+                                        sizeof(config_results) / sizeof(config_results[0]));
+    assert(lhkt_test_bridge_restore_rx_freq(&cfg) == LHKT_OK);
+    assert(lhkt_test_bridge_config_call_count() == 1);
+}
+
+
+static void test_equal_rx_tx_frequencies_send_no_config_at_all(void)
+{
+    /* The current LHPC default on both bands, and what the live box runs: --rx-freq 433.775
+     * --tx-freq 433.775. This TNC's OWN defaults are still the 433.775/433.900 split, which is why
+     * the test sets them equal explicitly. The split-frequency shift would then be a round trip back to the
+     * frequency the radio is already on — and it is not free, because each config line carries
+     * MODE=LORA, so the daemon performs a full chip re-init rather than a setFrequency(). Two
+     * re-inits and tx_settle_ms per packet, with the receiver down across all of it. */
+    lhkt_config_t cfg;
+    lhkt_stats_t stats;
+    kiss_params_t params;
+    kiss_frame_t frame;
+    int config_results[] = { LHKT_OK, LHKT_OK };
+
+    lhkt_config_defaults(&cfg);
+    cfg.tx_freq = cfg.rx_freq;                 /* equal: nothing to shift */
+    lhkt_stats_init(&stats);
+    kiss_params_init(&params);
+    make_valid_kiss_frame(&frame);
+
+    lhkt_test_bridge_reset_tx_hooks();
+    lhkt_test_bridge_set_config_results(config_results,
+                                        sizeof(config_results) / sizeof(config_results[0]));
+    lhkt_test_bridge_set_write_result(1);          /* stub the socket; capture still records */
+
+    bridge_runtime_test_reset_hooks();
+    assert(lhkt_test_handle_kiss_frame(&frame, &params, &cfg, &stats, 42) == LHKT_OK);
+    assert(lhkt_test_bridge_write_call_count() == 1);      /* the frame still goes out */
+    assert(lhkt_test_bridge_config_call_count() == 0);     /* and nothing was retuned */
+    /* ...and tx_settle_ms is skipped too: the config file defines it as the wait "after switching
+     * to TX frequency before sending", so with no switch there is nothing to settle for. The ONE
+     * remaining sleep is the tx_return_ms wait on the non-TXRESULT path, which this change does
+     * not touch; the shift case below takes the same wait PLUS the settle, so the difference of
+     * exactly one is the settle itself. */
+    assert(lhkt_test_bridge_sleep_call_count() == 1);
+}
+
+
+static void test_differing_rx_tx_frequencies_still_shift_and_restore(void)
+{
+    /* The other half: the guard must not disable split operation, which is the whole reason the
+     * shift exists. The defaults differ (433.900 TX / 433.775 RX), so both lines must still go. */
+    lhkt_config_t cfg;
+    lhkt_stats_t stats;
+    kiss_params_t params;
+    kiss_frame_t frame;
+    int config_results[] = { LHKT_OK, LHKT_OK };
+
+    lhkt_config_defaults(&cfg);
+    lhkt_stats_init(&stats);
+    kiss_params_init(&params);
+    make_valid_kiss_frame(&frame);
+
+    lhkt_test_bridge_reset_tx_hooks();
+    lhkt_test_bridge_set_config_results(config_results,
+                                        sizeof(config_results) / sizeof(config_results[0]));
+    lhkt_test_bridge_set_write_result(1);          /* stub the socket; capture still records */
+
+    bridge_runtime_test_reset_hooks();
+    assert(lhkt_test_handle_kiss_frame(&frame, &params, &cfg, &stats, 42) == LHKT_OK);
+    assert(lhkt_test_bridge_config_call_count() == 2);
+    assert(lhkt_test_bridge_sleep_call_count() == 2);      /* the same wait PLUS tx_settle_ms */
+    assert(lhkt_test_bridge_config_freq_at(0) > 433.899);  /* out to TX */
+    assert(lhkt_test_bridge_config_freq_at(0) < 433.901);
+    assert(lhkt_test_bridge_config_freq_at(1) > 433.774);  /* back to RX */
+    assert(lhkt_test_bridge_config_freq_at(1) < 433.776);
+}
+
+
+static void test_equal_frequencies_send_nothing_on_a_failure_path_either(void)
+{
+    /* Why the guard lives inside restore_rx_freq rather than at the transmit site: restore has
+     * FIVE callers — the settle-shutdown path, the TX-write failure, a missing TX_RESULT, the
+     * confirmed-success path and the non-TXRESULT path. A guard at the transmit site would leave
+     * the other four still retuning. This drives the TX-write failure and asserts both that no
+     * config line is sent and that the error code is unchanged. */
+    lhkt_config_t cfg;
+    lhkt_stats_t stats;
+    kiss_params_t params;
+    kiss_frame_t frame;
+    int config_results[] = { LHKT_OK, LHKT_OK };
+
+    lhkt_config_defaults(&cfg);
+    cfg.tx_freq = cfg.rx_freq;
+    lhkt_stats_init(&stats);
+    kiss_params_init(&params);
+    make_valid_kiss_frame(&frame);
+
+    lhkt_test_bridge_reset_tx_hooks();
+    lhkt_test_bridge_set_config_results(config_results,
+                                        sizeof(config_results) / sizeof(config_results[0]));
+    lhkt_test_bridge_set_write_result(-1);
+
+    assert(lhkt_test_handle_kiss_frame(&frame, &params, &cfg, &stats, 42) == LHKT_ERR_TX_SOCKET);
+    assert(lhkt_test_bridge_config_call_count() == 0);
+    assert(stats.tx_restore_failures == 0);
+}
+
+
 static void test_shutdown_during_tx_settle_restores_rx(void)
 {
     lhkt_config_t cfg;
@@ -1417,6 +1545,10 @@ int main(void)
     test_client_write_failure_returns_socket_error();
     test_initial_config_uses_rx_frequency();
     test_tx_write_failure_restores_rx();
+    test_restore_fails_toward_shifting_when_tx_freq_is_unknown();
+    test_equal_rx_tx_frequencies_send_no_config_at_all();
+    test_differing_rx_tx_frequencies_still_shift_and_restore();
+    test_equal_frequencies_send_nothing_on_a_failure_path_either();
     test_shutdown_during_tx_settle_restores_rx();
     test_tx_socket_error_invalidates_data_socket();
     test_rx_restore_retry_success_counts_failure();

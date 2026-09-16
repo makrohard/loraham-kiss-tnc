@@ -302,6 +302,44 @@ static ssize_t bridge_loraham_write(int fd,
     return (ssize_t)len;
 }
 
+/*
+ * Does a transmission need the split-frequency shift at all?
+ *
+ * Split operation (RX != TX) needs it. Equal RX/TX does not: the pair would be a round trip to the
+ * frequency the radio is already on, and not a free one — each config line carries MODE=LORA, so
+ * the daemon re-initialises the chip rather than setting a frequency.
+ *
+ * Two rules to keep:
+ *   - unknown state fails toward shifting (see the function body);
+ *   - do NOT cache what the daemon was last told. The daemon can restart and lose its
+ *     configuration; a cache would then be wrong and nothing would re-send. Startup and reconnect
+ *     re-establish the profile, and LHPC admits only one radio-profile writer per band.
+ */
+static int bridge_loraham_tx_shift_needed(const lhkt_config_t *cfg)
+{
+    double diff;
+
+    /* Fail toward shifting. The answer is NO only when both frequencies are known AND equal —
+     * anything else, including either being unknown, answers YES. That matters for the restore
+     * caller: "tx_freq unknown" is absence of information, not evidence that no shift happened,
+     * and skipping the restore on it would leave the radio parked on the TX frequency. The TX
+     * path never reaches here without both (it returns LHKT_ERR_FORMAT first), so the YES costs
+     * nothing there. */
+    if (!cfg || !cfg->have_tx_freq || !cfg->have_rx_freq) {
+        return 1;
+    }
+
+    /* Both values come from the same CLI/config parse and are never computed, so they are
+     * bit-identical when the operator sets them equal. Compare with a tolerance anyway: relying on
+     * that is a trap for whoever later introduces a computed offset. 1 Hz, far below any channel. */
+    diff = cfg->tx_freq - cfg->rx_freq;
+    if (diff < 0.0) {
+        diff = -diff;
+    }
+
+    return diff > 0.000001 ? 1 : 0;
+}
+
 static int bridge_loraham_restore_rx_freq(const lhkt_config_t *cfg,
                                           lhkt_stats_t *stats,
                                           int conf_fd)
@@ -310,6 +348,14 @@ static int bridge_loraham_restore_rx_freq(const lhkt_config_t *cfg,
 
     if (!cfg || !cfg->have_rx_freq) {
         return LHKT_ERR_FORMAT;
+    }
+
+    /* Nothing was shifted, so there is nothing to restore. The guard lives HERE rather than at the
+     * five call sites (the settle-shutdown path, the TX-write failure, a missing TX_RESULT, the
+     * confirmed-success path and the non-TXRESULT path) so that every one of them agrees, and none
+     * of them changes. */
+    if (!bridge_loraham_tx_shift_needed(cfg)) {
+        return LHKT_OK;
     }
 
     ret = bridge_loraham_send_config_freq(cfg, conf_fd, cfg->rx_freq);
@@ -654,6 +700,13 @@ static int bridge_loraham_wait_tx_result(
     }
 }
 
+#ifdef LHKT_TEST
+int lhkt_test_bridge_restore_rx_freq(const lhkt_config_t *cfg)
+{
+    return bridge_loraham_restore_rx_freq(cfg, NULL, -1);
+}
+#endif
+
 static int bridge_loraham_send_packet_with_client(
     const lhkt_config_t *cfg,
     lhkt_stats_t *stats,
@@ -667,6 +720,7 @@ static int bridge_loraham_send_packet_with_client(
     int *packet_written)
 {
     int ret;
+    int shift;
     int confirm_ret;
     int client_error;
     loraham_tx_result_t tx_result;
@@ -697,17 +751,23 @@ static int bridge_loraham_send_packet_with_client(
         return LHKT_ERR_FORMAT;
     }
 
-    ret = bridge_loraham_send_config_freq(cfg, conf_fd, cfg->tx_freq);
-    if (ret != LHKT_OK) {
-        if (stats) {
-            stats->loraham_drop++;
-        }
+    shift = bridge_loraham_tx_shift_needed(cfg);
 
-        printf("[LoRaHAM] TX drop: switch to tx_freq failed\n");
-        return ret;
+    if (shift) {
+        ret = bridge_loraham_send_config_freq(cfg, conf_fd, cfg->tx_freq);
+        if (ret != LHKT_OK) {
+            if (stats) {
+                stats->loraham_drop++;
+            }
+
+            printf("[LoRaHAM] TX drop: switch to tx_freq failed\n");
+            return ret;
+        }
     }
 
-    if (bridge_runtime_sleep_ms(cfg->tx_settle_ms) != LHKT_OK) {
+    /* tx_settle_ms is documented as "wait after switching to TX frequency before sending"
+     * (loraham_kiss_tnc.conf.example), so with no switch there is nothing to settle for. */
+    if (shift && bridge_runtime_sleep_ms(cfg->tx_settle_ms) != LHKT_OK) {
         ret = bridge_loraham_restore_rx_freq(cfg, stats, conf_fd);
         if (ret != LHKT_OK) {
             printf("[LoRaHAM] Shutdown during TX settle and RX restore failed\n");

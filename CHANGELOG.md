@@ -1,3 +1,12 @@
+# 0.6.2
+- No TX frequency shift when `rx_freq` and `tx_freq` are equal, which is the current LHPC default
+  on both bands (this TNC's own defaults remain the 433.775/433.900 split). The shift exists for split-frequency APRS; with the two equal it was a round trip
+  back to the frequency the radio was already on, and not a free one — each config line carries
+  `MODE=LORA`, so the daemon performs a full chip re-init rather than a `setFrequency()`. That was
+  two re-inits plus `tx_settle_ms` per packet, with the receiver down across all of it. The guard
+  is stateless and sits inside the RX restore, so all five of its callers agree; split operation
+  with differing frequencies is unchanged.
+
 # 0.6.1
 - RF log: a confirmed transmission is logged before the RX-frequency restore, so a
   failed restore no longer loses the `ok` line (both the TX_RESULT and the legacy path).

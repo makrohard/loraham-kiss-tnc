@@ -54,6 +54,7 @@ APRS-IS.
 - RX RSSI/SNR metadata is ignored and not forwarded to KISS clients
 - TX is synchronous: while a transmission is confirmed the bridge does not service KISS client input (bounded by tx_busy_timeout_ms)
 - Per-packet log lines require --verbose
+- With equal RX/TX frequencies the bridge sends no radio configuration before a transmission, so it assumes it is the only radio-profile writer on that daemon band. Another daemon client issuing a radio `SET` would leave the band on its own profile. LoRaHAM Pi Control enforces one application per band automatically; standalone deployments must arrange it themselves.
 
 ## TX policy
 
