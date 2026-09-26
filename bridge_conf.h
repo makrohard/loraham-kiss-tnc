@@ -6,7 +6,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LHKT_CONF_LINE_MAX 256
+/* At least the daemon's CONF reply bound: it formats every reply into a 512-byte buffer
+ * (STATUS: status[512] in config_dispatch.cpp), so any line it can send fits. 256 dropped daemon 1.2.0's
+ * 283-character STATUS as over-long, and without a parsed STATUS the bridge never
+ * transmits. */
+#define LHKT_CONF_LINE_MAX 512
 
 typedef struct {
     int tx_busy;

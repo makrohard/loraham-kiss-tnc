@@ -1,3 +1,9 @@
+# 0.6.3
+- The CONF line buffer holds 512 bytes (was 256), at least the daemon's 512-byte reply bound. LoRaHAM
+  daemon 1.2.0's `STATUS` line is 283 characters; it was dropped as over-long, no `STATUS` was
+  ever parsed, and the bridge queued every packet without transmitting it. 512 is the daemon's own reply
+  bound, so the bridge can never again be shorter than what the daemon may send.
+
 # 0.6.2
 - No TX frequency shift when `rx_freq` and `tx_freq` are equal, which is the current LHPC default
   on both bands (this TNC's own defaults remain the 433.775/433.900 split). The shift exists for split-frequency APRS; with the two equal it was a round trip

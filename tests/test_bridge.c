@@ -1493,13 +1493,55 @@ static void test_framed_rx_survives_no_client(void)
     assert(stats.loraham_rx == 0);
 }
 
+/* The STATUS line LoRaHAM daemon 1.2.0 sends (283 characters: 1.2.0 added
+ * HIGHPOWER= and CHIPFAMILY=). With a 256-byte line buffer it was dropped as
+ * over-long, have_status never became 1, and the bridge never transmitted. */
+static void test_conf_daemon_120_status_line_is_parsed(void)
+{
+    const char *line =
+        "STATUS RADIO=READY TX=0 CAD=0 GETRSSI=0 TXRESULT=1 TXMODE=MANAGED "
+        "TXQUEUE=1 TXQ=0 TXQDROP=0 TXQREJECT=0 TXQSTALE=0 TXQRESULTDROP=0 "
+        "TXQDONE=0 TXQLAST=NONE TXQSEQ=0 CADWAIT=1500 CADIDLE=250 CADPOLL=50 "
+        "CADTXAFTERTIMEOUT=0 CADMONITOR=0 CADRSSI=-90 RXREADY=1 HIGHPOWER=0 "
+        "CHIPFAMILY=SX127x\n";
+    int radio_ready = -1;
+    int have_status = -1;
+
+    assert(strlen(line) == 284);
+    assert(lhkt_test_bridge_conf_feed(line, NULL, NULL, &radio_ready,
+                                      &have_status) == LHKT_OK);
+    assert(have_status == 1);
+    assert(radio_ready == 1);
+}
+
+/* KISS's maximum accepted line: 511 content bytes plus '\n'. That is at least the
+ * daemon's 512-byte reply buffer (config_dispatch.cpp status[512], which holds 510
+ * characters, the '\n' and the NUL). */
+static void test_conf_longest_accepted_line_is_parsed(void)
+{
+    char text[520];
+    const char *head = "STATUS RADIO=READY TX=0 CAD=0 ";
+    size_t n = strlen(head);
+    int radio_ready = -1;
+    int have_status = -1;
+
+    memcpy(text, head, n);
+    memset(text + n, 'X', 511 - n);
+    text[511] = '\n';
+    text[512] = '\0';
+    assert(lhkt_test_bridge_conf_feed(text, NULL, NULL, &radio_ready,
+                                      &have_status) == LHKT_OK);
+    assert(have_status == 1);
+    assert(radio_ready == 1);
+}
+
 /* An over-long CONF line must be dropped whole: its tail ("TX=1") must not
  * parse as its own event once the line exceeds LHKT_CONF_LINE_MAX. */
 static void test_conf_overlong_line_is_discarded(void)
 {
-    char text[512];
+    char text[LHKT_CONF_LINE_MAX + 64];
     int tx_busy = -1;
-    size_t pad = 300;
+    size_t pad = LHKT_CONF_LINE_MAX + 20;
 
     memset(text, 'X', pad);
     snprintf(text + pad, sizeof(text) - pad, "TX=1\n");
@@ -1515,6 +1557,8 @@ int main(void)
     test_conf_status_parser();
     test_conf_event_transition_counters();
     test_conf_txresult_status_parser();
+    test_conf_daemon_120_status_line_is_parsed();
+    test_conf_longest_accepted_line_is_parsed();
     test_conf_overlong_line_is_discarded();
     test_txresult_ok_forwards_trailing_rx();
     test_txresult_client_write_failure_propagates();
