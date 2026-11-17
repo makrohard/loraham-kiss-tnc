@@ -1,3 +1,7 @@
+# 0.6.4
+- `power` takes 0..22 (was 0..20). The TNC sends it in every SET and the daemon checks it against the radio,
+  so the TNC's own bound only stopped a valid 21 or 22 (an SX1262 Meshstick) at load ("Config load failed").
+
 # 0.6.3
 - The CONF line buffer holds 512 bytes (was 256), at least the daemon's 512-byte reply bound. LoRaHAM
   daemon 1.2.0's `STATUS` line is 283 characters; it was dropped as over-long, no `STATUS` was

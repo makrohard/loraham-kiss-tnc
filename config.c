@@ -401,7 +401,7 @@ int lhkt_config_parse_line(lhkt_config_t *cfg, char *line, unsigned int line_no)
     }
 
     if (strcmp(key, "power") == 0) {
-        ret = parse_long_value(value, 0, 20, &lval);
+        ret = parse_long_value(value, 0, 22, &lval);   /* the daemon guards the radio's own range */
         if (ret == LHKT_OK) {
             cfg->power = (int)lval;
         }

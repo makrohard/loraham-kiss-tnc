@@ -199,7 +199,7 @@ static void test_reject_invalid(void)
     char bad11[] = "bw = -inf";
     char bad12[] = "sf = 6";
     char bad13[] = "power = -1";
-    char bad14[] = "power = 21";
+    char bad14[] = "power = 23";
     char bad15[] = "tx_queue_len = 0";
     char bad16[] = "tx_queue_len = 17";
     char bad17[] = "tx_packet_ttl_ms = 999";
@@ -223,6 +223,24 @@ static void test_reject_invalid(void)
     assert(lhkt_config_parse_line(&cfg, bad15, 15) == LHKT_ERR_FORMAT);
     assert(lhkt_config_parse_line(&cfg, bad16, 16) == LHKT_ERR_FORMAT);
     assert(lhkt_config_parse_line(&cfg, bad17, 17) == LHKT_ERR_FORMAT);
+}
+
+static void test_power_range(void)
+{
+    /* The daemon guards the radio's range (an SX1262 Meshstick takes 22): this parser takes 0..22 and passes the
+       value on in every SET, so a power the daemon accepts never stops the TNC at load. */
+    lhkt_config_t cfg;
+    char p0[] = "power = 0";
+    char p22[] = "power = 22";
+    char p23[] = "power = 23";
+
+    lhkt_config_defaults(&cfg);
+    assert(lhkt_config_parse_line(&cfg, p0, 1) == LHKT_OK);
+    assert(cfg.power == 0);
+    assert(lhkt_config_parse_line(&cfg, p22, 2) == LHKT_OK);
+    assert(cfg.power == 22);
+    assert(lhkt_config_parse_line(&cfg, p23, 3) == LHKT_ERR_FORMAT);
+    assert(cfg.power == 22);
 }
 
 static void test_bind_config_key(void)
@@ -254,6 +272,7 @@ int main(void)
     test_hash_only_comments();
     test_load_file();
     test_reject_invalid();
+    test_power_range();
 
     puts("test_config: OK");
     return 0;
